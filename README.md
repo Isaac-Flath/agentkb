@@ -1,125 +1,177 @@
-# AgentKB
+# agentkb
 
-> **Pre-alpha.** This is under active development. APIs, CLI commands, and storage formats may change without notice.
+> A personal, local-first memory system for coding agents.
 
-A local-first knowledge system for agents. Today its core is **persistent wiki pages + searchable agent chat history**, with **skills** as a git-synced filesystem sidecar.
+Background, motivation, and design decisions: https://isaacflath.com/writing/agentkb
 
-The power is in the intersection:
+Agents are amnesiacs. agentkb is my attempt at giving *mine* a memory I can live with. Plain markdown I can read and edit, a  search layer that's reliable enough to trust, and separate stores for different kinds of knowledge so each one can fetch, chunk, and retrieve on its own terms.
 
-- **Wiki** captures distilled, durable knowledge
-- **Chat history** captures what was tried, what failed, and what was learned
-- **Skills** capture repeatable procedures
+The power is in the intersection of the stores:
 
-Your data stays local in universal formats: markdown, JSONL, and normal files on disk. Indexes are ephemeral caches rebuilt from source data.
+- **Wiki** captures distilled, durable knowledge.
+- **Chats** capture what was tried, what failed, what was learned.
+- **Communications** capture dense, link-rich threads (currently X).
+- **Skills** capture repeatable procedures on disk.
 
-> Built-in code indexing was removed in April 2026. For code search in the current project, use **colgrep** or normal file tools.
+All source data lives in normal files (markdown, JSONL, plain directories). Indexes are ephemeral caches rebuilt from source data. Backed up to git, one repo per store.
 
-## Install
 
-Install as a uv tool so `agentkb` is available globally:
+## Is this for you?
 
-```bash
-uv tool install agentkb
+Probably not as-is. This is a personal tool, shaped to my workflow and the specific agents I use (Claude Code and Pi).  There no extension mechanism. The code is here so you can:
+
+- **Point your agent at the repo**, take the parts that make sense, and build your own.
+- **Fork it** if it's close to what you want and extend it with stores you care about.
+- Read it to steal ideas for how to structure a memory layer of your own.
+
+The bar for "just install it and use it" is not what I'm optimizing for. If that's what you want, the README still tells you everything you need, but don't expect smooth onboarding or long-term stability.
+
+## Architecture
+
+Every store follows the same three-layer shape:
+
+- **Source data** is owned by agentkb (copied in, not referenced in place) so sync has a stable snapshot.
+- **Readable markdown** is what you and your agent read and what gets indexed.
+- **Indexes** are rebuilt incrementally when readable files change.
+
+### On disk
+
+```
+~/.agentkb/
+  config.json              # settings
+  traceability.db          # every search + intermediate rankings, for evals
+  wiki/
+    wiki/                  # pages you and the agent write
+    sources/               # raw ingested documents
+    schema.md              # writing conventions
+    index.md               # page catalog
+    .index/                # FTS5 + PLAID, git-ignored
+  chats/
+    sessions/              # JSONL copied from Claude Code / Pi
+      claude/
+      pi/
+    readable/              # rendered markdown, one file per session
+      YYYY-MM/
+    .index/
+  communications/
+    raw/
+      x/                   # tweets + handle manifest
+    readable/              # thread-per-file markdown
+    .index/
+  skills/
+    .claude/skills/        # loaded by Claude Code via --add-dir
 ```
 
-Or install from source for development:
+## The stores
 
-```bash
-uv tool install --editable --python 3.13 ~/path/to/agentkb
+### Wiki
+
+Plain markdown files you and your agents write. General-purpose: gotchas, taste, people, tools, domain knowledge, mental models. Complements skills. Skills are procedures, the wiki is knowledge.
+
+```
+~/.agentkb/wiki/
+  wiki/            # pages
+  sources/         # raw ingested documents
+  schema.md        # writing conventions (read this before bulk edits)
+  index.md         # catalog
 ```
 
-To upgrade:
+### Chats
 
-```bash
-uv tool upgrade agentkb
+Coding-agent conversations, exported to readable markdown and indexed. Built-in sources: **Claude Code** (`~/.claude/projects/`) and **Pi** (`~/.pi/agent/sessions/`).
+
+Three-stage pipeline:
+
+```
+source JSONL
+  -> ~/.agentkb/chats/sessions/{source}/...         # agentkb-owned copy
+  -> ~/.agentkb/chats/readable/YYYY-MM/*.md         # renderable + searchable
+  -> ~/.agentkb/chats/.index/                       # FTS5 + PLAID
 ```
 
-## Quick Start
+The readable markdown keeps user messages, assistant text and thinking blocks, tool calls formatted for reading, tool results capped, and frontmatter with `source`, `session_id`, `project`, `date`, `messages`.
 
-```bash
-# Initialize your wiki
-agentkb store wiki init
+### Communications
 
-# Export + index coding-agent chat history (Claude Code + Pi)
-agentkb store chats index
+Dense, link-rich communications. Today that's X.  A curated handle list fetched via the X API, filtered to originals + self-reply threads + quote-tweets (skips retweets and replies to other users), rendered one thread per markdown file.
 
-# Search the wiki (default scope)
-agentkb search "DaVinci Resolve scripting gotchas"
+Requires `X_BEARER_TOKEN` in the environment (app-only bearer, from your X developer portal).
 
-# Search chat history
-agentkb search -s chats "how did I fix the auth bug"
+### Skills
 
-# Search wiki + chats together
-agentkb search -s all "authentication"
+Agent skill directories (`SKILL.md` + scripts + references) synced via git. **Not indexed, not searched.** Claude Code loads them directly via `--add-dir`.
 
-# Check what exists
-agentkb status
+```
+~/.agentkb/skills/
+  .claude/skills/
+    content-blog/
+      SKILL.md
+      scripts/
+      references/
+    ...
 ```
 
-For code search inside the current repo:
-
 ```bash
-colgrep "error handling logic"
+agentkb store skills list
+agentkb store skills path                 # prints the dir — useful for --add-dir
+alias claude='claude --add-dir $(agentkb store skills path)'
 ```
-
-## Stores
-
-AgentKB currently has three store types:
-
-- **Wiki**: plain markdown pages you and your agents write. Hard-won lessons, techniques, taste, people, tools, domain knowledge.
-- **Chat History**: coding-agent conversations exported as readable markdown, fully searchable. Built-in sources currently include Claude Code and Pi.
-- **Skills**: agent skill directories (`SKILL.md` + scripts + references) managed by git. Not indexed or searched.
 
 ## Search
 
 ```bash
-agentkb search "retry logic with backoff"              # semantic search (default: wiki)
-agentkb search -s wiki "why did we choose JWT"         # search wiki
-agentkb search -s chats "how did I fix the auth bug"   # search chat history
-agentkb search -s all "authentication"                 # search wiki + chats
-agentkb search -e "error" "deployment issues"         # regex + semantic
-agentkb search --json "query"                          # JSON output for scripts
+agentkb search "retry logic with backoff"                    # default scope: wiki
+agentkb "retry logic with backoff"                           # shorthand (default-search group)
+
+agentkb search -s chats "how did I fix the auth bug"
+agentkb search -s all "authentication flow"                  # wiki + chats (NOT communications)
+agentkb search -s communications "colbert plaid"             # explicit opt-in
+
+agentkb search -e "async def" "error handling"               # regex pre-filter
+agentkb search -F "TODO:" "incomplete work"                  # fixed string
+agentkb search -w -e "test" "testing patterns"               # word boundary
+agentkb search --include="*.md" "writing style"
+agentkb search --exclude-dir=archive "config"
+
+agentkb search -k 10 "retry"                                 # top-k (default: 3)
+agentkb search -c "main entry point"                         # full content
+agentkb search -l "authentication"                           # files only
+agentkb search --json "error handling"                       # for scripts/agents
+agentkb search --semantic-only "retry"                       # skip keyword search
 ```
+
+Results are tagged with their source: `[wiki]`, `[wiki:source]`, `[chats]`, `[communications]`.
+
+Every search is recorded in `~/.agentkb/traceability.db` — the original query, semantic-expanded query, pattern, per-stage rankings (semantic / keyword / RRF), and final results. Useful for evals and for debugging why a result did or didn't surface.
 
 ## Consolidation
 
-Turn recent chat activity into wiki knowledge:
+Turning chat and communications activity into durable wiki pages. Consolidation is an **instruction generator**: agentkb exports the relevant sessions/threads, prints the paths, and prints a prompt the agent acts on. The agent does the synthesis.
 
 ```bash
-agentkb consolidate
-agentkb consolidate --since "30 days"
-```
-
-This exports recent chat history, prints the relevant local paths, and prints consolidation instructions the agent can act on. The agent reads the sessions, extracts reusable lessons, and writes or updates wiki pages.
-
-## Skills
-
-Manage agent skills with git sync:
-
-```bash
-agentkb settings set skills_remote "git@github.com:user/my-skills.git"
-agentkb sync pull
-agentkb store skills list
+agentkb consolidate chats
+agentkb consolidate communications
 ```
 
 ## Sync
 
-Back up your wiki, chat history, and skills to git remotes:
+One git repo per store. The source data syncs.
 
 ```bash
-agentkb settings set wiki_remote "git@github.com:user/agentkb-wiki.git"
-agentkb settings set chats_remote "git@github.com:user/agentkb-chats.git"
-agentkb settings set skills_remote "git@github.com:user/my-skills.git"
+agentkb settings set wiki_remote           "git@github.com:you/wiki.git"
+agentkb settings set chats_remote          "git@github.com:you/chats.git"
+agentkb settings set communications_remote "git@github.com:you/communications.git"
+agentkb settings set skills_remote         "git@github.com:you/skills.git"
 
-agentkb sync push
-agentkb sync pull
+agentkb sync pull                          # clone missing, pull the rest
+agentkb sync push                          # stage + commit + push per store
 agentkb sync status
 ```
 
-## Documentation
+The traceability DB syncs separately to S3 (so it can stay private and grow without bloating git):
 
-Full docs at [isaacflath.com/agentkb](https://isaacflath.com/agentkb).
-
-## How It Works
-
-Hybrid search: ColBERT multi-vector embeddings (semantic) + SQLite FTS5 (keyword), fused with reciprocal rank fusion. Indexes are incremental: only changed files are re-encoded.
+```bash
+agentkb settings set traceability_s3_bucket "my-bucket"
+agentkb settings set traceability_s3_key    "agentkb/traceability.db"
+# `agentkb sync push/pull` handles S3 upload/download when configured
+```

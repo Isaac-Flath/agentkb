@@ -10,19 +10,7 @@ default:
 install-tool:
     uv tool install --editable --force --python 3.13 .
 
-# Sync docs to S3 for isaacflath.com/docs/agentkb
-docs-publish:
-    uv run scripts/sync-docs-to-s3.py
-
-# Preview what docs would be uploaded
-docs-publish-dry:
-    uv run scripts/sync-docs-to-s3.py --dry-run
-
-# Build code index for current project
-index:
-    uv run agentkb code index
-
-# Index everything (code + KB + chats)
+# Index everything (wiki + chats + communications)
 index-all:
     uv run agentkb index
 
