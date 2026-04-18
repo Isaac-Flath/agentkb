@@ -158,7 +158,7 @@ def _ensure_chats_store(scope, *, json_output=False):
 @click.option("-w", "word", is_flag=True, help="Word boundary matching")
 @click.option("-l", "files_only", is_flag=True, help="Files/pages only")
 @click.option("-c", "full_content", is_flag=True, help="Full content output")
-@click.option("-k", "top_k", default=15, help="Top-k results")
+@click.option("-k", "top_k", type=int, default=lambda: Settings().get("top_k"), help="Top-k results (default from settings)")
 @click.option("-n", "context_lines", default=6, help="Context lines")
 @click.option("--json", "json_output", is_flag=True, help="JSON output for agents")
 @click.option("--include", multiple=True, help="Include files matching glob")
@@ -425,12 +425,24 @@ def settings(ctx, json_output):
             click.echo(json_mod.dumps(payload, indent=2))
             return
 
+        path_resolvers = {
+            "wiki_path": "wiki_root",
+            "chats_path": "chats_root",
+            "communications_path": "communications_root",
+            "references_path": "references_root",
+            "skills_path": "skills_root",
+        }
         click.echo(f"[agentkb] Config file: {payload['config_file']}")
         click.echo()
         for key, value in payload["settings"].items():
             default = SETTINGS_DEFAULTS.get(key)
-            marker = "" if value == default else " (custom)"
-            click.echo(f"  {key}: {value}{marker}")
+            if value == default and key in path_resolvers:
+                resolved = payload["resolved_paths"][path_resolvers[key]]
+                click.echo(f"  {key}: {resolved} (default)")
+            elif value == default:
+                click.echo(f"  {key}: {value}")
+            else:
+                click.echo(f"  {key}: {value} (custom)")
 
 
 @settings.command("set")

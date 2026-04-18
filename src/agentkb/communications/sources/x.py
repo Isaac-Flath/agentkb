@@ -23,7 +23,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agentkb.communications.sources import CommunicationSource, register
@@ -33,6 +33,7 @@ X_API_BASE = "https://api.x.com/2"
 USER_AGENT = "agentkb/0.3"
 MAX_TWEETS_PER_FETCH = 100  # X API cap per request
 INITIAL_FETCH_PAGES = 5  # up to 500 tweets on first fetch per handle
+INITIAL_FETCH_LOOKBACK_DAYS = 180  # don't go further back than this on first fetch
 
 TWEET_FIELDS = "created_at,author_id,conversation_id,in_reply_to_user_id,referenced_tweets,entities,public_metrics,lang"
 USER_FIELDS = "username,name,description"
@@ -223,6 +224,12 @@ def fetch_handle_tweets(raw_dir: Path, username: str, *, max_pages: int | None =
     if max_pages is None:
         max_pages = 1 if since_id else INITIAL_FETCH_PAGES
 
+    # Bound initial fetch to last N days (since_id overrides this on incremental fetches).
+    start_time = None
+    if not since_id:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=INITIAL_FETCH_LOOKBACK_DAYS)
+        start_time = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     all_tweets: list[dict] = []
     all_includes_users: list[dict] = []
     all_includes_tweets: list[dict] = []
@@ -238,6 +245,8 @@ def fetch_handle_tweets(raw_dir: Path, username: str, *, max_pages: int | None =
         }
         if since_id:
             params["since_id"] = since_id
+        elif start_time:
+            params["start_time"] = start_time
         if next_token:
             params["pagination_token"] = next_token
 

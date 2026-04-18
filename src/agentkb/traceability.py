@@ -71,7 +71,7 @@ class SearchTrace:
     fixed: bool = False
     word: bool = False
     scope: str = ""
-    top_k: int = 15
+    top_k: int = 3
     include: tuple[str, ...] | list[str] = ()
     exclude: tuple[str, ...] | list[str] = ()
     semantic_only: bool = False

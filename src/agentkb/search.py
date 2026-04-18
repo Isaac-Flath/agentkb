@@ -172,7 +172,7 @@ def search(
     query_embedding: np.ndarray,
     query_text: str,
     scope: str = "all",
-    top_k: int = 15,
+    top_k: int = 3,
     pattern: str | None = None,
     fixed: bool = False,
     word: bool = False,
@@ -306,7 +306,7 @@ def search(
 
 def merge_multi_collection(
     result_lists: list[list[SearchResult]],
-    top_k: int = 15,
+    top_k: int = 3,
 ) -> list[SearchResult]:
     """Merge results from multiple stores using RRF.
 

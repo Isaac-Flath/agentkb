@@ -31,7 +31,7 @@ def test_settings_defaults(tmp_path):
     with patch.object(paths, "config_file", return_value=config_file):
         s = Settings()
     assert s.get("default_scope") == "wiki"
-    assert s.get("top_k") == 15
+    assert s.get("top_k") == 3
 
 
 def test_settings_set_and_persist(tmp_path):

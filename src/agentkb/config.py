@@ -87,7 +87,7 @@ class paths:
 
 SETTINGS_DEFAULTS = {
     "default_scope": "wiki",
-    "top_k": 15,
+    "top_k": 3,
     "wiki_path": "",
     "wiki_remote": "",
     "chats_path": "",
