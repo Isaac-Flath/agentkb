@@ -9,7 +9,7 @@ from agentkb.wiki.manager import KnowledgeBase
 from agentkb.wiki.parser import build_wiki_index, wiki_index_is_stale
 
 
-NOT_READY_MESSAGE = "[agentkb] No wiki found. Run `agentkb store wiki init` first."
+NOT_READY_MESSAGE = "[agentkb] No wiki found at ~/.agentkb/wiki. Drop a markdown file under `wiki/` there and run `agentkb index`."
 
 
 def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
@@ -38,7 +38,7 @@ def status_lines() -> list[str]:
     """Return the ``agentkb status`` output for this store."""
     wiki_path = paths.wiki_dir()
     if not wiki_path.exists():
-        return ["  Wiki: not initialized (run `agentkb store wiki init`)"]
+        return [f"  Wiki: not initialized (no directory at {wiki_path})"]
 
     stats = KnowledgeBase(wiki_path).status()
     lines = [f"  Wiki: {stats['wiki_pages']} pages, {stats['sources']} sources"]

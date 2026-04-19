@@ -26,20 +26,27 @@ WIKI_ROOTS: list[tuple[str, str]] = [
 ]
 
 
+_INDEXED_SUFFIXES = (".md", ".rst")
+
+
 def _list_wiki_files(wiki_root: Path) -> dict[str, tuple[Path, str]]:
     """Walk both wiki subdirs, returning {rel_path: (abs_path, collection)}.
 
     Relative paths include the subdir prefix (e.g. ``wiki/foo.md``) so state
     keys and SQLite ``file`` values are unique across the two collections.
+    Picks up ``.md`` and ``.rst`` files so rST-documented repos mirrored
+    under ``sources/refs/`` are indexed without a conversion pass.
     """
     out: dict[str, tuple[Path, str]] = {}
     for subdir, collection in WIKI_ROOTS:
         d = wiki_root / subdir
         if not d.exists():
             continue
-        for md_file in sorted(d.rglob("*.md")):
-            rel = str(md_file.relative_to(wiki_root))
-            out[rel] = (md_file, collection)
+        for path in sorted(d.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in _INDEXED_SUFFIXES:
+                continue
+            rel = str(path.relative_to(wiki_root))
+            out[rel] = (path, collection)
     return out
 
 
@@ -172,7 +179,9 @@ def wiki_index_is_stale(wiki_root: Path, index_dir: Path) -> bool:
         d = wiki_root / subdir
         if not d.exists():
             continue
-        for f in d.rglob("*.md"):
+        for f in d.rglob("*"):
+            if not f.is_file() or f.suffix.lower() not in _INDEXED_SUFFIXES:
+                continue
             if f.stat().st_mtime > index_mtime:
                 return True
 

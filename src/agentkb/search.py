@@ -331,6 +331,10 @@ def _scope_to_collections(scope: str) -> list[str]:
     match scope:
         case "wiki":
             return ["wiki", "wiki:source"]
+        case "wiki:notes":
+            return ["wiki"]
+        case "wiki:source":
+            return ["wiki:source"]
         case "chats":
             return ["chats"]
         case "communications":

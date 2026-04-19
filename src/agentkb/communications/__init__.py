@@ -12,7 +12,7 @@ import agentkb.communications.sources.x  # noqa: F401
 
 
 NOT_READY_MESSAGE = (
-    "[agentkb] No communications found. Run `agentkb store communications index` first."
+    "[agentkb] No communications found. Run `agentkb index` first."
 )
 
 
@@ -40,8 +40,8 @@ def _render_from_raw() -> tuple[object, object, object]:
 def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
     """Re-render readable markdown from existing raw (no API fetch) and refresh the index.
 
-    Does NOT fetch from external APIs — users fetch explicitly via
-    ``agentkb store communications fetch`` or ``agentkb store communications index``.
+    Does NOT fetch from external APIs — ``agentkb index`` is the entry point
+    that performs fetches.
     """
     _, readable_dir, index_dir = _render_from_raw()
 
@@ -114,5 +114,5 @@ def status_lines() -> list[str]:
             return [line]
 
     if handle_count:
-        return [f"  Communications: {handle_count} X handles tracked, not indexed (run `agentkb store communications index`)"]
-    return ["  Communications: not configured (run `agentkb store communications x add-handle <handle>`)"]
+        return [f"  Communications: {handle_count} X handles tracked, not indexed (run `agentkb index`)"]
+    return ["  Communications: not configured (edit ~/.agentkb/communications/raw/x/_handles.json to add X handles)"]

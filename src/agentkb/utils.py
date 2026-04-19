@@ -72,14 +72,65 @@ def parse_page(path: Path, content: str) -> dict:
     }
 
 
+RST_UNDERLINE_CHARS = set("=-~^\"'`*+#<>:")
+
+
+def _find_markdown_headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Return list of ``(line_index, level, heading_text)`` for ATX headings."""
+    headings: list[tuple[int, int, str]] = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^(#{1,6})\s+(.+)", line)
+        if m:
+            headings.append((i, len(m.group(1)), m.group(2).strip()))
+    return headings
+
+
+def _find_rst_headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Return list of ``(line_index, level, heading_text)`` for rST headings.
+
+    rST headings are a text line followed by an underline of ``=``/``-``/``~``
+    (any punctuation in RST_UNDERLINE_CHARS works) at least as long as the
+    heading text. Overlined headings (punctuation line above AND below) are
+    also recognized. Levels are assigned in order of first appearance of each
+    underline character — the first distinct character is level 1, the next
+    distinct character is level 2, etc. (matches Sphinx convention.)
+    """
+    first_seen: dict[str, int] = {}
+    headings: list[tuple[int, int, str]] = []
+
+    i = 0
+    while i < len(lines) - 1:
+        text_line = lines[i]
+        under = lines[i + 1]
+        stripped_under = under.strip()
+        stripped_text = text_line.strip()
+
+        if (
+            stripped_text
+            and stripped_under
+            and len(stripped_under) >= len(stripped_text)
+            and len(set(stripped_under)) == 1
+            and stripped_under[0] in RST_UNDERLINE_CHARS
+        ):
+            char = stripped_under[0]
+            if char not in first_seen:
+                first_seen[char] = len(first_seen) + 1
+            headings.append((i, first_seen[char], stripped_text))
+            i += 2
+            continue
+        i += 1
+    return headings
+
+
 def chunk_markdown(
     path: Path,
     relative_to: Path | None = None,
 ) -> list[dict]:
-    """Split a markdown file into chunks at heading boundaries.
+    """Split a markdown or reStructuredText file into chunks at heading boundaries.
 
     Returns list of dicts with: file, title, section, line, content, tags.
-    This is the generic splitter — store-specific parsers add structured_text.
+    Dispatches on extension: ``.rst`` uses underline-style heading detection;
+    everything else uses ATX ``#`` markdown headings.
     """
     text = path.read_text(errors="replace")
     file_path = str(path.relative_to(relative_to)) if relative_to else str(path)
@@ -91,12 +142,8 @@ def chunk_markdown(
     content = strip_frontmatter(text)
     lines = content.split("\n")
 
-    # Find heading positions
-    headings = []
-    for i, line in enumerate(lines):
-        m = re.match(r"^(#{1,6})\s+(.+)", line)
-        if m:
-            headings.append((i, len(m.group(1)), m.group(2).strip()))
+    is_rst = path.suffix.lower() == ".rst"
+    headings = _find_rst_headings(lines) if is_rst else _find_markdown_headings(lines)
 
     # No headings — one chunk for the whole page
     if not headings:

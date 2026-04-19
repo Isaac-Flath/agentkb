@@ -24,27 +24,11 @@ def main():
     pass
 
 
-# --- Store namespace ---
-# Store-specific operations live under `agentkb store <name> ...` so the top
-# level stays focused on cross-cutting commands (search, index, status, sync,
-# settings, consolidate).
+# --- Refs: top-level command group ---
 
-from agentkb.wiki.cli import wiki  # noqa: E402
-from agentkb.chats.cli import chats  # noqa: E402
-from agentkb.communications.cli import communications  # noqa: E402
-from agentkb.skills.cli import skills  # noqa: E402
+from agentkb.references.cli import refs  # noqa: E402
 
-
-@main.group()
-def store():
-    """Per-store operations: wiki, chats, communications, skills."""
-    pass
-
-
-store.add_command(wiki)
-store.add_command(chats)
-store.add_command(communications)
-store.add_command(skills)
+main.add_command(refs)
 
 
 # --- Cross-cutting: search ---
@@ -87,7 +71,7 @@ STATUS_STORES = [wiki_store, chats_store, communications_store, skills_store]
 
 @main.command()
 @click.argument("query")
-@click.option("-s", "--scope", type=click.Choice(["wiki", "chats", "communications", "all"]), default="wiki")
+@click.option("-s", "--scope", type=click.Choice(["wiki", "wiki:notes", "wiki:source", "chats", "communications", "all"]), default="wiki")
 @click.option("-e", "pattern", help="Regex pre-filter")
 @click.option("-F", "fixed", is_flag=True, help="Fixed string matching")
 @click.option("-w", "word", is_flag=True, help="Word boundary matching")
@@ -106,7 +90,10 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
     scopes = ["wiki", "chats"] if scope == "all" else [scope]
     stores_to_search: list[tuple[str, object]] = []
     for name in scopes:
-        module = SEARCH_STORES[name]
+        # wiki:notes / wiki:source narrow the collection filter but still
+        # live in the wiki store.
+        store_key = "wiki" if name.startswith("wiki") else name
+        module = SEARCH_STORES[store_key]
         store = module.ensure_search_store(json_output=json_output)
         if store is not None:
             stores_to_search.append((name, store))
@@ -114,7 +101,7 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
             echo_status(module.NOT_READY_MESSAGE, json_output=json_output)
 
     if not stores_to_search:
-        message = "[agentkb] No indexes found. Run `agentkb store wiki init` or `agentkb store chats index`."
+        message = "[agentkb] No indexes found. Run `agentkb index` to build them."
         echo_status(message, json_output=json_output)
         if json_output:
             click.echo(json_mod.dumps({"results": [], "message": message}, indent=2))
@@ -173,14 +160,21 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
 
 @main.command()
 @click.option("--model", help="Override ColBERT model name")
-@click.option("--no-fetch", is_flag=True, help="Skip fetching new communications from external sources")
+@click.option("--no-fetch", is_flag=True, help="Skip network fetches (refs + communications)")
 def index(model, no_fetch):
-    """Fetch, render, and index everything (wiki + chats + communications).
+    """Fetch, render, and index everything (refs + wiki + chats + communications).
 
-    Communications fetches hit external APIs (X); per-source failures are
-    logged but don't abort the run. Use ``--no-fetch`` to skip network calls,
-    or the per-store commands for granular control.
+    Network calls (ref syncs, X API fetches) run by default; per-source
+    failures are logged but don't abort the run. Use ``--no-fetch`` to skip
+    all network calls, or the per-store commands for granular control.
     """
+    if not no_fetch:
+        from agentkb import references as refs_store
+        results = refs_store.sync()
+        errors = [rid for rid, status in results.items() if isinstance(status, str) and status.startswith("error")]
+        if errors:
+            click.echo(f"[agentkb] refs: {len(errors)} failed ({', '.join(errors)})")
+
     for label, stats in [
         ("Wiki", wiki_store.reindex(model=model)),
         ("chat", chats_store.reindex(model=model)),

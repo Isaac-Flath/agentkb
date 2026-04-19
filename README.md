@@ -58,6 +58,8 @@ Every store follows the same three-layer shape:
       x/                   # tweets + handle manifest
     readable/              # thread-per-file markdown
     .index/
+  wiki/sources/refs/       # refs: mirrored external prose, managed by manifest.json
+  references/_cache/       # git-clone cache for git refs (bare-ish, reused across pulls)
   skills/
     .claude/skills/        # loaded by Claude Code via --add-dir
 ```
@@ -97,6 +99,20 @@ Dense, link-rich communications. Today that's X.  A curated handle list fetched 
 
 Requires `X_BEARER_TOKEN` in the environment (app-only bearer, from your X developer portal).
 
+### Refs
+
+Automated mirrors of external prose — github-hosted docs, papers, blog posts — fetched locally and indexed into the wiki as `wiki:source` chunks. A manifest under `~/.agentkb/wiki/sources/refs/manifest.json` tracks what's mirrored; `agentkb index` pulls the latest and reindexes.
+
+```bash
+agentkb refs add https://github.com/lightonai/pylate --subpath docs
+agentkb refs add https://alexzhang13.github.io/blog/2025/rlm/ --id rlm-blog
+agentkb refs add https://arxiv.org/html/2512.24601v2       --id attention
+agentkb refs list
+agentkb refs remove <id>
+```
+
+For git refs, always pass `--subpath` pointing at the docs directory — without it the whole repo is cloned and stray READMEs/CHANGELOGs clutter search. URL refs convert HTML→markdown on fetch (via `markdownify`).
+
 ### Skills
 
 Agent skill directories (`SKILL.md` + scripts + references) synced via git. **Not indexed, not searched.** Claude Code loads them directly via `--add-dir`.
@@ -112,9 +128,8 @@ Agent skill directories (`SKILL.md` + scripts + references) synced via git. **No
 ```
 
 ```bash
-agentkb store skills list
-agentkb store skills path                 # prints the dir — useful for --add-dir
-alias claude='claude --add-dir $(agentkb store skills path)'
+ls ~/.agentkb/skills
+alias claude='claude --add-dir ~/.agentkb/skills'
 ```
 
 ## Search
@@ -124,6 +139,8 @@ agentkb search "retry logic with backoff"                    # default scope: wi
 agentkb "retry logic with backoff"                           # shorthand (default-search group)
 
 agentkb search -s chats "how did I fix the auth bug"
+agentkb search -s wiki:notes "vector search"                 # hand-authored notes only
+agentkb search -s wiki:source "vector search"                # ingested sources + refs only
 agentkb search -s all "authentication flow"                  # wiki + chats (NOT communications)
 agentkb search -s communications "colbert plaid"             # explicit opt-in
 

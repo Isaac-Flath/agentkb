@@ -13,7 +13,7 @@ import agentkb.chats.sources.claude  # noqa: F401
 import agentkb.chats.sources.pi  # noqa: F401
 
 
-NOT_READY_MESSAGE = "[agentkb] No chat history found. Run `agentkb store chats index` first."
+NOT_READY_MESSAGE = "[agentkb] No chat history found. Run `agentkb index` first."
 
 
 def _sync_sessions_and_readable():
@@ -60,11 +60,11 @@ def status_lines() -> list[str]:
     """Return the ``agentkb status`` output for this store."""
     index_dir = paths.chats_dir() / ".index"
     if not index_dir.exists():
-        return ["  Chat history: not indexed (run `agentkb store chats index`)"]
+        return ["  Chat history: not indexed (run `agentkb index`)"]
 
     store = IndexStore(index_dir)
     if not store.exists():
-        return ["  Chat history: not indexed (run `agentkb store chats index`)"]
+        return ["  Chat history: not indexed (run `agentkb index`)"]
     line = f"  Chat history: {store.document_count()} chunks across {store.file_count()} session files"
     store.close()
     return [line]
