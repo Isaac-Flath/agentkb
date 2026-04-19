@@ -28,49 +28,51 @@ def _normalize_tool_arguments(tool_name: str, arguments: dict) -> dict:
     """Convert Pi tool argument fields to Claude's normalized schema."""
     canonical = _TOOL_NAME_MAP.get(tool_name, tool_name.capitalize())
 
-    if canonical == "Read":
-        return {"file_path": arguments.get("path", "")}
-    if canonical == "Write":
-        return {"file_path": arguments.get("path", ""), "content": arguments.get("content", "")}
-    if canonical == "Edit":
-        edits = arguments.get("edits", [])
-        if edits:
-            first = edits[0]
-            return {
-                "file_path": arguments.get("path", ""),
-                "old_string": first.get("oldText", ""),
-                "new_string": first.get("newText", ""),
-            }
-        return {"file_path": arguments.get("path", "")}
-    if canonical == "Bash":
-        return {"command": arguments.get("command", "")}
-    # Unknown tool — pass through as-is
-    return arguments
+    match canonical:
+        case "Read":
+            return {"file_path": arguments.get("path", "")}
+        case "Write":
+            return {"file_path": arguments.get("path", ""), "content": arguments.get("content", "")}
+        case "Edit":
+            edits = arguments.get("edits", [])
+            if edits:
+                first = edits[0]
+                return {
+                    "file_path": arguments.get("path", ""),
+                    "old_string": first.get("oldText", ""),
+                    "new_string": first.get("newText", ""),
+                }
+            return {"file_path": arguments.get("path", "")}
+        case "Bash":
+            return {"command": arguments.get("command", "")}
+        case _:
+            return arguments
 
 
 def _normalize_content_blocks(content: list) -> list:
     """Normalize Pi content blocks to the shared schema."""
     normalized = []
     for block in content:
-        if isinstance(block, str):
-            normalized.append(block)
-        elif isinstance(block, dict):
-            bt = block.get("type", "")
-            if bt == "text":
-                normalized.append({"type": "text", "text": block.get("text", "")})
-            elif bt == "thinking":
-                normalized.append({"type": "thinking", "thinking": block.get("thinking", "")})
-            elif bt == "toolCall":
-                pi_name = block.get("name", "")
-                canonical = _TOOL_NAME_MAP.get(pi_name, pi_name.capitalize())
-                arguments = block.get("arguments", {})
-                normalized.append({
-                    "type": "tool_use",
-                    "name": canonical,
-                    "input": _normalize_tool_arguments(pi_name, arguments),
-                })
-            else:
+        match block:
+            case str():
                 normalized.append(block)
+            case dict():
+                match block.get("type", ""):
+                    case "text":
+                        normalized.append({"type": "text", "text": block.get("text", "")})
+                    case "thinking":
+                        normalized.append({"type": "thinking", "thinking": block.get("thinking", "")})
+                    case "toolCall":
+                        pi_name = block.get("name", "")
+                        canonical = _TOOL_NAME_MAP.get(pi_name, pi_name.capitalize())
+                        arguments = block.get("arguments", {})
+                        normalized.append({
+                            "type": "tool_use",
+                            "name": canonical,
+                            "input": _normalize_tool_arguments(pi_name, arguments),
+                        })
+                    case _:
+                        normalized.append(block)
     return normalized
 
 
@@ -96,46 +98,45 @@ def parse_jsonl(jsonl_path: Path) -> list[dict]:
             role = msg.get("role", "")
             timestamp = obj.get("timestamp", "")
 
-            if role == "user":
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    content = _normalize_content_blocks(content)
-                messages.append({"role": "user", "content": content, "timestamp": timestamp})
+            match role:
+                case "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        content = _normalize_content_blocks(content)
+                    messages.append({"role": "user", "content": content, "timestamp": timestamp})
 
-            elif role == "assistant":
-                content = msg.get("content", [])
-                if isinstance(content, list):
-                    content = _normalize_content_blocks(content)
-                if not content:
-                    continue  # skip empty streaming stubs
-                messages.append({"role": "assistant", "content": content, "timestamp": timestamp})
+                case "assistant":
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        content = _normalize_content_blocks(content)
+                    if not content:
+                        continue  # skip empty streaming stubs
+                    messages.append({"role": "assistant", "content": content, "timestamp": timestamp})
 
-            elif role == "toolResult":
-                # Extract text from the tool result content
-                tool_content = msg.get("content", "")
-                if isinstance(tool_content, list):
-                    parts = [b.get("text", "") for b in tool_content
-                             if isinstance(b, dict) and b.get("type") == "text"]
-                    text = "\n".join(parts)
-                elif isinstance(tool_content, str):
-                    text = tool_content
-                else:
-                    text = ""
+                case "toolResult":
+                    tool_content = msg.get("content", "")
+                    match tool_content:
+                        case list():
+                            parts = [b.get("text", "") for b in tool_content
+                                     if isinstance(b, dict) and b.get("type") == "text"]
+                            text = "\n".join(parts)
+                        case str():
+                            text = tool_content
+                        case _:
+                            text = ""
 
-                result_block = {
-                    "type": "tool_result",
-                    "content": text,
-                    "is_error": msg.get("isError", False),
-                }
+                    result_block = {
+                        "type": "tool_result",
+                        "content": text,
+                        "is_error": msg.get("isError", False),
+                    }
 
-                # Append to the preceding assistant message
-                if messages and messages[-1]["role"] == "assistant":
-                    prev = messages[-1]["content"]
-                    if isinstance(prev, list):
-                        prev.append(result_block)
-                        continue
-                # Fallback: emit as a synthetic user message
-                messages.append({"role": "user", "content": [result_block], "timestamp": timestamp})
+                    if messages and messages[-1]["role"] == "assistant":
+                        prev = messages[-1]["content"]
+                        if isinstance(prev, list):
+                            prev.append(result_block)
+                            continue
+                    messages.append({"role": "user", "content": [result_block], "timestamp": timestamp})
 
     return messages
 

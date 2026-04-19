@@ -14,10 +14,6 @@ def get_encoder(model_name: str | None = None) -> "ColBERTEncoder":
     """Get (or create) the ColBERT encoder."""
     if model_name is None:
         model_name = DEFAULT_MODEL
-    return _get_cached_encoder(model_name)
-
-
-def _get_cached_encoder(model_name: str) -> "ColBERTEncoder":
     if model_name not in _encoder_cache:
         _encoder_cache[model_name] = ColBERTEncoder(model_name=model_name)
     return _encoder_cache[model_name]

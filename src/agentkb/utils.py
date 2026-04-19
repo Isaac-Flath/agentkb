@@ -171,14 +171,15 @@ def parse_time_filter(value: str | None, *, end_of_day: bool = False) -> datetim
     if relative_match:
         amount = int(relative_match.group(1))
         unit = relative_match.group(2)
-        if unit.startswith("minute"):
-            delta = timedelta(minutes=amount)
-        elif unit.startswith("hour"):
-            delta = timedelta(hours=amount)
-        elif unit.startswith("week"):
-            delta = timedelta(weeks=amount)
-        else:
-            delta = timedelta(days=amount)
+        match unit:
+            case "minute" | "minutes":
+                delta = timedelta(minutes=amount)
+            case "hour" | "hours":
+                delta = timedelta(hours=amount)
+            case "week" | "weeks":
+                delta = timedelta(weeks=amount)
+            case _:
+                delta = timedelta(days=amount)
         return now - delta
 
     normalized = raw.replace("Z", "+00:00")

@@ -102,20 +102,21 @@ def _extract_readable(content, role: str) -> str:
 
     parts = []
     for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict):
-            bt = block.get("type", "")
-            if bt == "text":
-                parts.append(block.get("text", ""))
-            elif bt == "thinking":
-                thinking = block.get("thinking", "")
-                if thinking.strip():
-                    parts.append(f"*Thinking:* {thinking}")
-            elif bt == "tool_use":
-                parts.append(_format_tool_use(block))
-            elif bt == "tool_result":
-                parts.append(_format_tool_result(block))
+        match block:
+            case str():
+                parts.append(block)
+            case dict():
+                match block.get("type", ""):
+                    case "text":
+                        parts.append(block.get("text", ""))
+                    case "thinking":
+                        thinking = block.get("thinking", "")
+                        if thinking.strip():
+                            parts.append(f"*Thinking:* {thinking}")
+                    case "tool_use":
+                        parts.append(_format_tool_use(block))
+                    case "tool_result":
+                        parts.append(_format_tool_result(block))
 
     return "\n\n".join(p for p in parts if p.strip())
 
@@ -149,26 +150,29 @@ def _format_tool_result(block: dict) -> str:
     is_error = block.get("is_error", False)
     rc = block.get("content", "")
 
-    if isinstance(rc, str):
-        if not rc.strip():
+    match rc:
+        case str():
+            if not rc.strip():
+                return ""
+            text = _cap_lines(rc, 30)
+            if is_error:
+                return f"**Error:**\n```\n{text}\n```"
+            return f"**Result:**\n```\n{text}\n```"
+
+        case list():
+            parts = []
+            for sub in rc:
+                if isinstance(sub, dict) and sub.get("type") == "text":
+                    text = _cap_lines(sub.get("text", ""), 30)
+                    if text.strip():
+                        parts.append(f"```\n{text}\n```")
+            if parts:
+                prefix = "**Error:**" if is_error else "**Result:**"
+                return f"{prefix}\n" + "\n".join(parts)
             return ""
-        text = _cap_lines(rc, 30)
-        if is_error:
-            return f"**Error:**\n```\n{text}\n```"
-        return f"**Result:**\n```\n{text}\n```"
 
-    if isinstance(rc, list):
-        parts = []
-        for sub in rc:
-            if isinstance(sub, dict) and sub.get("type") == "text":
-                text = _cap_lines(sub.get("text", ""), 30)
-                if text.strip():
-                    parts.append(f"```\n{text}\n```")
-        if parts:
-            prefix = "**Error:**" if is_error else "**Result:**"
-            return f"{prefix}\n" + "\n".join(parts)
-
-    return ""
+        case _:
+            return ""
 
 
 def render_session_markdown(
