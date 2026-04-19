@@ -77,16 +77,15 @@ def compute_index_diff(old_state: dict, new_state: dict, *, tracked_only: bool) 
     ``tracked_only`` restricts the diff to files already known to the index —
     new files are ignored and removed files don't trigger cleanup.
     """
-    if not old_state:
-        added = {f for f in new_state if f != MODEL_KEY}
-        return IndexDiff(added=added, files_to_process=added)
+    old_files = set(old_state) - {MODEL_KEY}
+    new_files = set(new_state) - {MODEL_KEY}
 
-    changed = {
-        f for f, h in new_state.items()
-        if f != MODEL_KEY and f in old_state and old_state[f] != h
-    }
-    added = {f for f in new_state if f != MODEL_KEY and f not in old_state}
-    removed = {f for f in old_state if f != MODEL_KEY and f not in new_state}
+    if not old_files:
+        return IndexDiff(added=new_files, files_to_process=new_files)
+
+    added = new_files - old_files
+    removed = old_files - new_files
+    changed = {f for f in old_files & new_files if old_state[f] != new_state[f]}
 
     if tracked_only:
         added = set()
