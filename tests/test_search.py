@@ -278,14 +278,14 @@ def test_cli_search_json_sends_status_to_stderr_not_stdout(monkeypatch):
     monkeypatch.setattr("agentkb.wiki.ensure_search_store", fake_ensure_wiki_store)
     monkeypatch.setattr("agentkb.chats.ensure_search_store", lambda *, json_output=False: None)
 
-    monkeypatch.setattr("agentkb.encoder.get_encoder", lambda: _FakeEncoder())
-    monkeypatch.setattr("agentkb.encoder.DEFAULT_MODEL", "fake-model")
-    monkeypatch.setattr("agentkb.search.merge_query_with_pattern", lambda query, pattern: query)
-    monkeypatch.setattr("agentkb.search.search", lambda **kwargs: [
+    monkeypatch.setattr("agentkb.cli.get_encoder", lambda: _FakeEncoder())
+    monkeypatch.setattr("agentkb.cli.DEFAULT_MODEL", "fake-model")
+    monkeypatch.setattr("agentkb.cli.merge_query_with_pattern", lambda query, pattern: query)
+    monkeypatch.setattr("agentkb.cli.run_search", lambda **kwargs: [
         SearchResult(collection="wiki", file="tools/test.md", line=1, score=0.9, content="A")
     ])
-    monkeypatch.setattr("agentkb.search.merge_multi_collection", lambda results, top_k: results[0])
-    monkeypatch.setattr("agentkb.traceability.SearchTrace", _FakeTrace)
+    monkeypatch.setattr("agentkb.cli.merge_multi_collection", lambda results, top_k: results[0])
+    monkeypatch.setattr("agentkb.cli.SearchTrace", _FakeTrace)
 
     stdout = StringIO()
     stderr = StringIO()
@@ -340,11 +340,11 @@ def test_cli_search_json_chat_reindex_stays_valid_json(monkeypatch, tmp_path):
     # agentkb.chats re-exports these at module load, so patch the re-exports.
     monkeypatch.setattr("agentkb.chats.build_chat_index", fake_build_chat_index)
     monkeypatch.setattr("agentkb.chats.chat_index_is_stale", lambda _readable_dir, _index_dir: False)
-    monkeypatch.setattr("agentkb.encoder.get_encoder", lambda: _FakeEncoder())
-    monkeypatch.setattr("agentkb.encoder.DEFAULT_MODEL", "fake-model")
-    monkeypatch.setattr("agentkb.search.merge_query_with_pattern", lambda query, pattern: query)
-    monkeypatch.setattr("agentkb.search.search", lambda **kwargs: [])
-    monkeypatch.setattr("agentkb.traceability.SearchTrace", _FakeTrace)
+    monkeypatch.setattr("agentkb.cli.get_encoder", lambda: _FakeEncoder())
+    monkeypatch.setattr("agentkb.cli.DEFAULT_MODEL", "fake-model")
+    monkeypatch.setattr("agentkb.cli.merge_query_with_pattern", lambda query, pattern: query)
+    monkeypatch.setattr("agentkb.cli.run_search", lambda **kwargs: [])
+    monkeypatch.setattr("agentkb.cli.SearchTrace", _FakeTrace)
 
     stdout = StringIO()
     stderr = StringIO()

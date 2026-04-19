@@ -54,6 +54,25 @@ from agentkb import chats as chats_store  # noqa: E402
 from agentkb import communications as communications_store  # noqa: E402
 from agentkb import skills as skills_store  # noqa: E402
 from agentkb import wiki as wiki_store  # noqa: E402
+from agentkb.chats.renderer import (  # noqa: E402
+    export_all_sessions,
+    export_readable,
+    migrate_sessions_layout,
+)
+from agentkb.communications.sources import SOURCES as COMMUNICATIONS_SOURCES  # noqa: E402
+from agentkb.encoder import DEFAULT_MODEL, get_encoder  # noqa: E402
+from agentkb.prompts import resolve_prompt  # noqa: E402
+from agentkb.search import (  # noqa: E402
+    merge_multi_collection,
+    merge_query_with_pattern,
+    search as run_search,
+)
+from agentkb.sync import (  # noqa: E402
+    pull as do_pull,
+    push as do_push,
+    status as get_sync_status,
+)
+from agentkb.traceability import SearchTrace, _db_path, pull_s3, push_s3  # noqa: E402
 
 
 # Communications is intentionally NOT in `all` — privacy-sensitive data stays
@@ -84,8 +103,6 @@ STATUS_STORES = [wiki_store, chats_store, communications_store, skills_store]
 def search(query, scope, pattern, fixed, word, files_only, full_content,
            top_k, context_lines, json_output, include, exclude, exclude_dir, semantic_only):
     """Search wiki, chats, or all."""
-    from agentkb.search import merge_multi_collection, search as run_search
-
     scopes = ["wiki", "chats"] if scope == "all" else [scope]
     stores_to_search: list[tuple[str, object]] = []
     for name in scopes:
@@ -102,10 +119,6 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
         if json_output:
             click.echo(json_mod.dumps({"results": [], "message": message}, indent=2))
         return
-
-    from agentkb.encoder import get_encoder, DEFAULT_MODEL
-    from agentkb.search import merge_query_with_pattern
-    from agentkb.traceability import SearchTrace
 
     semantic_query = merge_query_with_pattern(query, pattern) if pattern and not fixed else query
     query_embedding = get_encoder().encode_query(semantic_query)
@@ -276,7 +289,6 @@ def sync():
 @click.option("-v", "verbose", is_flag=True, help="Verbose output")
 def push(dry_run, verbose):
     """Commit and push local changes to git remotes and S3."""
-    from agentkb.sync import push as do_push
     try:
         results = do_push(dry_run=dry_run, verbose=verbose)
     except RuntimeError as e:
@@ -285,7 +297,6 @@ def push(dry_run, verbose):
 
     # Traceability DB -> S3
     if not dry_run:
-        from agentkb.traceability import push_s3
         try:
             results["traceability"] = push_s3(verbose=verbose)
         except Exception as e:
@@ -301,7 +312,6 @@ def push(dry_run, verbose):
 @click.option("-v", "verbose", is_flag=True, help="Verbose output")
 def pull(dry_run, verbose):
     """Pull latest changes from git remotes and S3."""
-    from agentkb.sync import pull as do_pull
     try:
         results = do_pull(dry_run=dry_run, verbose=verbose)
     except RuntimeError as e:
@@ -310,7 +320,6 @@ def pull(dry_run, verbose):
 
     # Traceability DB <- S3
     if not dry_run:
-        from agentkb.traceability import pull_s3
         try:
             results["traceability"] = pull_s3(verbose=verbose)
         except Exception as e:
@@ -327,8 +336,7 @@ def pull(dry_run, verbose):
 @sync.command("status")
 def sync_status():
     """Show sync configuration."""
-    from agentkb.sync import status as get_status
-    info = get_status()
+    info = get_sync_status()
 
     for name, store in info.items():
         click.echo(f"[agentkb] {name}:")
@@ -344,7 +352,6 @@ def sync_status():
         click.echo()
 
     # Traceability S3 status
-    from agentkb.traceability import _db_path
     s = Settings()
     bucket = s.get("traceability_s3_bucket")
     key = s.get("traceability_s3_key")
@@ -364,9 +371,6 @@ def sync_status():
 
 
 def _emit_consolidate_chats(since: str) -> None:
-    from agentkb.prompts import resolve_prompt
-    from agentkb.chats.renderer import export_all_sessions, migrate_sessions_layout, export_readable
-
     wiki_path = paths.wiki_dir()
     readable_dir = paths.chats_readable_dir()
     sessions_dir = paths.chats_sessions_dir()
@@ -402,15 +406,12 @@ def _emit_consolidate_communications(since: str) -> None:
     report paths point at current files, but never spends X credits here —
     that's what `agentkb communications index` is for.
     """
-    from agentkb.prompts import resolve_prompt
-    from agentkb.communications.sources import SOURCES
-
     comms_root = paths.communications_dir()
     raw_dir = comms_root / "raw"
     readable_dir = comms_root / "readable"
 
     if raw_dir.exists():
-        for src in SOURCES.values():
+        for src in COMMUNICATIONS_SOURCES.values():
             src_raw = raw_dir / src.name
             if src_raw.exists():
                 try:
