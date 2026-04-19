@@ -1,7 +1,6 @@
-"""Tests for agentkb.chats.parser — chat export, readable rendering, tool formatting.
+"""Tests for the chats pipeline: readable rendering (renderer.py) and indexing (parser.py).
 
-chats/parser.py handles the pipeline that turns raw Claude Code JSONL conversations
-into searchable content. The pipeline has three stages:
+The pipeline has three stages:
 1. export_sessions: copy JSONL from ~/.claude/projects/ to agentkb-owned storage
 2. export_readable: convert JSONL to human-readable markdown (with tool formatting)
 3. build_chat_index: chunk and embed the readable markdown for search
@@ -17,7 +16,7 @@ import json
 from pathlib import Path
 
 import agentkb.chats.parser as chats_parser
-from agentkb.chats.parser import (
+from agentkb.chats.renderer import (
     _summarize_tool_input,
     _cap_lines,
     _slugify,
@@ -338,7 +337,7 @@ def test_build_chat_index_json_output_writes_progress_to_stderr(monkeypatch, tmp
     (readable_dir / "session.md").write_text("---\ntitle: Session\n---\n\n# Topic\n\nDiscussion")
 
     monkeypatch.setattr(chats_parser, "IndexStore", _FakeStore)
-    monkeypatch.setattr(chats_parser, "get_encoder", lambda model_name=None: _FakeEncoder())
+    monkeypatch.setattr("agentkb.indexing.get_encoder", lambda model_name=None: _FakeEncoder())
 
     stdout = StringIO()
     stderr = StringIO()

@@ -50,104 +50,20 @@ store.add_command(skills)
 # --- Cross-cutting: search ---
 
 
-def _search_status(message, *, json_output=False):
-    """Emit search status without corrupting machine-readable JSON output."""
-    echo_status(message, json_output=json_output)
+from agentkb import chats as chats_store  # noqa: E402
+from agentkb import communications as communications_store  # noqa: E402
+from agentkb import skills as skills_store  # noqa: E402
+from agentkb import wiki as wiki_store  # noqa: E402
 
 
-def _ensure_wiki_store(scope, *, json_output=False):
-    """Ensure wiki index is up to date. Returns (label, IndexStore) or None."""
-    from agentkb.store import IndexStore
-    from agentkb.wiki.parser import build_wiki_index, wiki_index_is_stale
-
-    wiki_path = paths.wiki_dir()
-    if not wiki_path.exists():
-        if scope == "wiki":
-            _search_status("[agentkb] No wiki found. Run `agentkb wiki init` first.", json_output=json_output)
-        return None
-
-    wiki_index = wiki_path / ".index"
-    if not wiki_index.exists() or wiki_index_is_stale(wiki_path, wiki_index):
-        _search_status("[agentkb] Updating Wiki index...", json_output=json_output)
-        build_wiki_index(wiki_path, wiki_index, json_output=json_output)
-    return ("wiki", IndexStore(wiki_index))
-
-
-def _ensure_communications_store(scope, *, json_output=False):
-    """Ensure communications index is up to date. Returns (label, IndexStore) or None.
-
-    Does NOT auto-fetch from external APIs — only (re)renders existing raw data
-    and rebuilds the index from changed readable files. Users fetch explicitly
-    via `agentkb store communications fetch` or `agentkb store communications index`.
-    """
-    from agentkb.store import IndexStore
-    from agentkb.communications.parser import (
-        build_communications_index,
-        communications_index_is_stale,
-    )
-
-    comms_dir = paths.communications_dir()
-    readable_dir = comms_dir / "readable"
-    index_dir = comms_dir / ".index"
-
-    # Re-render from raw without fetching (cheap, no API calls).
-    raw_dir = comms_dir / "raw"
-    if raw_dir.exists():
-        from agentkb.communications.sources import SOURCES
-        for src in SOURCES.values():
-            src_raw = raw_dir / src.name
-            if src_raw.exists():
-                try:
-                    src.render(src_raw, readable_dir)
-                except Exception:
-                    pass
-
-    if not readable_dir.exists():
-        if scope == "communications":
-            _search_status(
-                "[agentkb] No communications found. Run `agentkb store communications index` first.",
-                json_output=json_output,
-            )
-        return None
-
-    if not index_dir.exists():
-        _search_status("[agentkb] Building communications index...", json_output=json_output)
-        build_communications_index(readable_dir, index_dir, json_output=json_output)
-    elif communications_index_is_stale(readable_dir, index_dir):
-        build_communications_index(readable_dir, index_dir, tracked_only=True, json_output=json_output)
-
-    if index_dir.exists():
-        return ("communications", IndexStore(index_dir))
-    return None
-
-
-def _ensure_chats_store(scope, *, json_output=False):
-    """Ensure chats index is up to date. Returns (label, IndexStore) or None."""
-    from agentkb.store import IndexStore
-    from agentkb.chats.parser import export_all_sessions, migrate_sessions_layout, export_readable, build_chat_index, chat_index_is_stale
-
-    chats_index_dir = paths.chats_dir() / ".index"
-    sessions_dir = paths.chats_sessions_dir()
-    readable_dir = paths.chats_readable_dir()
-
-    migrate_sessions_layout(sessions_dir)
-    export_all_sessions(sessions_dir)
-    if sessions_dir.exists():
-        export_readable(sessions_dir, readable_dir)
-
-    if not readable_dir.exists():
-        if scope == "chats":
-            _search_status("[agentkb] No chat history found. Run `agentkb store chats index` first.", json_output=json_output)
-        return None
-
-    if not chats_index_dir.exists():
-        _search_status("[agentkb] Building chat index...", json_output=json_output)
-        build_chat_index(readable_dir, chats_index_dir, json_output=json_output)
-    elif chat_index_is_stale(readable_dir, chats_index_dir):
-        build_chat_index(readable_dir, chats_index_dir, tracked_only=True, json_output=json_output)
-    if chats_index_dir.exists():
-        return ("chats", IndexStore(chats_index_dir))
-    return None
+# Communications is intentionally NOT in `all` — privacy-sensitive data stays
+# opt-in via an explicit `-s communications`.
+SEARCH_STORES = {
+    "wiki": wiki_store,
+    "chats": chats_store,
+    "communications": communications_store,
+}
+STATUS_STORES = [wiki_store, chats_store, communications_store, skills_store]
 
 
 @main.command()
@@ -170,22 +86,19 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
     """Search wiki, chats, or all."""
     from agentkb.search import merge_multi_collection, search as run_search
 
-    # Build stores for requested scope.
-    # Communications is intentionally NOT in `all` — privacy-sensitive data
-    # stays opt-in via explicit `-s communications`.
-    store_fns = {
-        "wiki": _ensure_wiki_store,
-        "chats": _ensure_chats_store,
-        "communications": _ensure_communications_store,
-    }
     scopes = ["wiki", "chats"] if scope == "all" else [scope]
-    stores_to_search = [
-        s for name in scopes if (s := store_fns[name](scope, json_output=json_output)) is not None
-    ]
+    stores_to_search: list[tuple[str, object]] = []
+    for name in scopes:
+        module = SEARCH_STORES[name]
+        store = module.ensure_search_store(json_output=json_output)
+        if store is not None:
+            stores_to_search.append((name, store))
+        elif name == scope:
+            echo_status(module.NOT_READY_MESSAGE, json_output=json_output)
 
     if not stores_to_search:
         message = "[agentkb] No indexes found. Run `agentkb store wiki init` or `agentkb store chats index`."
-        _search_status(message, json_output=json_output)
+        echo_status(message, json_output=json_output)
         if json_output:
             click.echo(json_mod.dumps({"results": [], "message": message}, indent=2))
         return
@@ -252,65 +165,16 @@ def index(model, no_fetch):
     """Fetch, render, and index everything (wiki + chats + communications).
 
     Communications fetches hit external APIs (X); per-source failures are
-    logged but don't abort the run. Use `--no-fetch` to skip network calls,
+    logged but don't abort the run. Use ``--no-fetch`` to skip network calls,
     or the per-store commands for granular control.
     """
-    # Wiki index (if exists)
-    wiki_path = paths.wiki_dir()
-    if wiki_path.exists() and (wiki_path / "wiki").exists():
-        from agentkb.wiki.parser import build_wiki_index
-        wiki_stats = build_wiki_index(wiki_path, wiki_path / ".index", model_name=model)
-        if wiki_stats["chunks_indexed"] > 0:
-            click.echo(f"[agentkb] Indexed {wiki_stats['chunks_indexed']} Wiki chunks")
-
-    # Chat index (if sessions exist)
-    from agentkb.chats.parser import export_all_sessions, migrate_sessions_layout, export_readable, build_chat_index
-    sessions_dir = paths.chats_sessions_dir()
-    readable_dir = paths.chats_readable_dir()
-
-    migrate_sessions_layout(sessions_dir)
-    export_all_sessions(sessions_dir)
-    if sessions_dir.exists():
-        export_readable(sessions_dir, readable_dir)
-    if readable_dir.exists():
-        chat_stats = build_chat_index(readable_dir, paths.chats_dir() / ".index", model_name=model)
-        if not chat_stats.get("up_to_date") and chat_stats.get("chunks_indexed", 0) > 0:
-            click.echo(f"[agentkb] Indexed {chat_stats['chunks_indexed']} chat chunks")
-
-    # Communications: fetch (unless --no-fetch), render, index
-    from agentkb.communications.sources import SOURCES
-    comms_dir = paths.communications_dir()
-    comms_raw = comms_dir / "raw"
-    comms_readable = comms_dir / "readable"
-
-    if not no_fetch:
-        comms_raw.mkdir(parents=True, exist_ok=True)
-        for src in SOURCES.values():
-            src_raw = comms_raw / src.name
-            if not src_raw.exists():
-                continue
-            try:
-                stats = src.fetch(src_raw)
-                if stats.get("fetched"):
-                    click.echo(f"[agentkb] {src.name} fetch: {stats['fetched']} new")
-                for err in stats.get("errors", []) or []:
-                    click.echo(f"  ! {src.name}: {err}", err=True)
-            except Exception as e:
-                click.echo(f"[agentkb] {src.name} fetch failed: {e}", err=True)
-
-    if comms_raw.exists():
-        for src in SOURCES.values():
-            src_raw = comms_raw / src.name
-            if src_raw.exists():
-                try:
-                    src.render(src_raw, comms_readable)
-                except Exception as e:
-                    click.echo(f"[agentkb] {src.name} render failed: {e}", err=True)
-    if comms_readable.exists():
-        from agentkb.communications.parser import build_communications_index
-        comms_stats = build_communications_index(comms_readable, comms_dir / ".index", model_name=model)
-        if not comms_stats.get("up_to_date") and comms_stats.get("chunks_indexed", 0) > 0:
-            click.echo(f"[agentkb] Indexed {comms_stats['chunks_indexed']} communication chunks")
+    for label, stats in [
+        ("Wiki", wiki_store.reindex(model=model)),
+        ("chat", chats_store.reindex(model=model)),
+        ("communication", communications_store.reindex(model=model, fetch=not no_fetch)),
+    ]:
+        if stats.get("chunks_indexed", 0) > 0 and not stats.get("up_to_date"):
+            click.echo(f"[agentkb] Indexed {stats['chunks_indexed']} {label} chunks")
 
 
 # --- Cross-cutting: status ---
@@ -319,69 +183,11 @@ def index(model, no_fetch):
 @main.command()
 def status():
     """Show status of all collections."""
-    from agentkb.store import IndexStore
-
     click.echo("[agentkb] Status")
     click.echo()
-
-    # Wiki
-    wiki_path = paths.wiki_dir()
-    if wiki_path.exists():
-        from agentkb.wiki.manager import KnowledgeBase
-        stats = KnowledgeBase(wiki_path).status()
-        click.echo(f"  Wiki: {stats['wiki_pages']} pages, {stats['sources']} sources")
-        wiki_index = wiki_path / ".index"
-        if wiki_index.exists():
-            store = IndexStore(wiki_index)
-            if store.exists():
-                click.echo(f"  Wiki index: {store.document_count()} chunks indexed")
-                store.close()
-    else:
-        click.echo("  Wiki: not initialized (run `agentkb store wiki init`)")
-
-    # Chats
-    chats_index = paths.chats_dir() / ".index"
-    if chats_index.exists():
-        store = IndexStore(chats_index)
-        if store.exists():
-            click.echo(f"  Chat history: {store.document_count()} chunks across {store.file_count()} session files")
-            store.close()
-    else:
-        click.echo("  Chat history: not indexed (run `agentkb store chats index`)")
-
-    # Communications
-    comms_index = paths.communications_dir() / ".index"
-    comms_raw = paths.communications_dir() / "raw"
-    handle_count = 0
-    if (comms_raw / "x" / "_handles.json").exists():
-        from agentkb.communications.sources.x import load_handles
-        handle_count = len(load_handles(comms_raw / "x"))
-    if comms_index.exists():
-        store = IndexStore(comms_index)
-        if store.exists():
-            click.echo(
-                f"  Communications: {store.document_count()} chunks across {store.file_count()} files"
-                + (f" ({handle_count} X handles)" if handle_count else "")
-            )
-            store.close()
-    else:
-        if handle_count:
-            click.echo(f"  Communications: {handle_count} X handles tracked, not indexed (run `agentkb store communications index`)")
-        else:
-            click.echo("  Communications: not configured (run `agentkb store communications x add-handle <handle>`)")
-
-    # Skills
-    skills_dir = paths.skills_dir()
-    if skills_dir.exists():
-        from agentkb.skills.cli import _find_skills
-        skill_files = _find_skills(skills_dir)
-        click.echo(f"  Skills: {len(skill_files)} installed ({skills_dir})")
-    else:
-        s = Settings()
-        if s.get("skills_remote"):
-            click.echo("  Skills: not cloned (run `agentkb sync pull`)")
-        else:
-            click.echo("  Skills: not configured (set skills_remote)")
+    for module in STATUS_STORES:
+        for line in module.status_lines():
+            click.echo(line)
 
 
 # --- Settings, sync ---
@@ -559,7 +365,7 @@ def sync_status():
 
 def _emit_consolidate_chats(since: str) -> None:
     from agentkb.prompts import resolve_prompt
-    from agentkb.chats.parser import export_all_sessions, migrate_sessions_layout, export_readable
+    from agentkb.chats.renderer import export_all_sessions, migrate_sessions_layout, export_readable
 
     wiki_path = paths.wiki_dir()
     readable_dir = paths.chats_readable_dir()

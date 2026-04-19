@@ -257,8 +257,8 @@ def test_cli_search_json_no_indexes_stays_valid_json(monkeypatch):
     """--json must keep stdout machine-readable even when no indexes exist."""
     runner = CliRunner()
 
-    monkeypatch.setattr(cli, "_ensure_wiki_store", lambda scope, *, json_output=False: None)
-    monkeypatch.setattr(cli, "_ensure_chats_store", lambda scope, *, json_output=False: None)
+    monkeypatch.setattr("agentkb.wiki.ensure_search_store", lambda *, json_output=False: None)
+    monkeypatch.setattr("agentkb.chats.ensure_search_store", lambda *, json_output=False: None)
 
     result = runner.invoke(cli.main, ["search", "query", "--json"])
 
@@ -269,13 +269,14 @@ def test_cli_search_json_no_indexes_stays_valid_json(monkeypatch):
 
 def test_cli_search_json_sends_status_to_stderr_not_stdout(monkeypatch):
     """Status chatter should go to stderr so stdout remains pure JSON."""
+    from agentkb.output import echo_status as real_echo_status
 
-    def fake_ensure_wiki_store(scope, *, json_output=False):
-        cli._search_status("[agentkb] Updating Wiki index...", json_output=json_output)
-        return ("wiki", object())
+    def fake_ensure_wiki_store(*, json_output=False):
+        real_echo_status("[agentkb] Updating Wiki index...", json_output=json_output)
+        return object()
 
-    monkeypatch.setattr(cli, "_ensure_wiki_store", fake_ensure_wiki_store)
-    monkeypatch.setattr(cli, "_ensure_chats_store", lambda scope, *, json_output=False: None)
+    monkeypatch.setattr("agentkb.wiki.ensure_search_store", fake_ensure_wiki_store)
+    monkeypatch.setattr("agentkb.chats.ensure_search_store", lambda *, json_output=False: None)
 
     monkeypatch.setattr("agentkb.encoder.get_encoder", lambda: _FakeEncoder())
     monkeypatch.setattr("agentkb.encoder.DEFAULT_MODEL", "fake-model")
@@ -323,9 +324,9 @@ def test_cli_search_json_chat_reindex_stays_valid_json(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.paths, "chats_sessions_dir", lambda: sessions_dir)
     monkeypatch.setattr(cli.paths, "chats_readable_dir", lambda: readable_dir)
     monkeypatch.setattr("agentkb.store.IndexStore", lambda _path: object())
-    monkeypatch.setattr("agentkb.chats.parser.migrate_sessions_layout", lambda _sessions_dir: False)
-    monkeypatch.setattr("agentkb.chats.parser.export_all_sessions", lambda _sessions_dir: {"copied": 0, "skipped": 0, "total": 0})
-    monkeypatch.setattr("agentkb.chats.parser.export_readable", lambda _sessions_dir, _readable_dir: {"generated": 0})
+    monkeypatch.setattr("agentkb.chats.renderer.migrate_sessions_layout", lambda _sessions_dir: False)
+    monkeypatch.setattr("agentkb.chats.renderer.export_all_sessions", lambda _sessions_dir: {"copied": 0, "skipped": 0, "total": 0})
+    monkeypatch.setattr("agentkb.chats.renderer.export_readable", lambda _sessions_dir, _readable_dir: {"generated": 0})
 
     seen = {}
 
@@ -336,8 +337,9 @@ def test_cli_search_json_chat_reindex_stays_valid_json(monkeypatch, tmp_path):
         index_dir.mkdir(parents=True, exist_ok=True)
         return {"sessions_parsed": 0, "chunks_indexed": 0}
 
-    monkeypatch.setattr("agentkb.chats.parser.build_chat_index", fake_build_chat_index)
-    monkeypatch.setattr("agentkb.chats.parser.chat_index_is_stale", lambda _readable_dir, _index_dir: False)
+    # agentkb.chats re-exports these at module load, so patch the re-exports.
+    monkeypatch.setattr("agentkb.chats.build_chat_index", fake_build_chat_index)
+    monkeypatch.setattr("agentkb.chats.chat_index_is_stale", lambda _readable_dir, _index_dir: False)
     monkeypatch.setattr("agentkb.encoder.get_encoder", lambda: _FakeEncoder())
     monkeypatch.setattr("agentkb.encoder.DEFAULT_MODEL", "fake-model")
     monkeypatch.setattr("agentkb.search.merge_query_with_pattern", lambda query, pattern: query)

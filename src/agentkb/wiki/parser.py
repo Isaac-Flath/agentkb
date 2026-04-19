@@ -2,30 +2,49 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
 from pathlib import Path
 
-from agentkb.utils import file_hash, chunk_markdown_directory
-from agentkb.encoder import get_encoder
+from agentkb.encoder import DEFAULT_MODEL
+from agentkb.indexing import (
+    MODEL_KEY,
+    build_new_state,
+    compute_index_diff,
+    encode_and_append,
+    load_old_state,
+    resolve_model_change,
+)
 from agentkb.output import echo_status
 from agentkb.store import IndexStore
+from agentkb.utils import chunk_markdown
 
 
-@dataclass
-class WikiChunk:
-    """A chunk of a wiki markdown document."""
-    file: str
-    collection: str  # "wiki" or "wiki:source"
-    title: str
-    section: str
-    line: int
-    content: str
-    tags: list[str]
-    structured_text: str = ""
+# (subdir name, collection tag) — the wiki store fans files into two collections.
+WIKI_ROOTS: list[tuple[str, str]] = [
+    ("wiki", "wiki"),
+    ("sources", "wiki:source"),
+]
 
 
-def _make_structured_text(collection: str, title: str, section: str, tags: list[str], content: str) -> str:
-    """Generate structured text for embedding a wiki chunk."""
+def _list_wiki_files(wiki_root: Path) -> dict[str, tuple[Path, str]]:
+    """Walk both wiki subdirs, returning {rel_path: (abs_path, collection)}.
+
+    Relative paths include the subdir prefix (e.g. ``wiki/foo.md``) so state
+    keys and SQLite ``file`` values are unique across the two collections.
+    """
+    out: dict[str, tuple[Path, str]] = {}
+    for subdir, collection in WIKI_ROOTS:
+        d = wiki_root / subdir
+        if not d.exists():
+            continue
+        for md_file in sorted(d.rglob("*.md")):
+            rel = str(md_file.relative_to(wiki_root))
+            out[rel] = (md_file, collection)
+    return out
+
+
+def _make_wiki_structured_text(collection: str, title: str, section: str, tags: list, content: str) -> str:
+    """Structured text used for semantic embedding of a wiki chunk."""
     parts = [f"[{collection}] {title}"]
     if section and section != "(full page)":
         parts[0] += f" > {section}"
@@ -34,27 +53,6 @@ def _make_structured_text(collection: str, title: str, section: str, tags: list[
     parts.append("")
     parts.append(content)
     return "\n".join(parts)
-
-
-def chunk_wiki_directory(root: Path, collection: str = "wiki") -> list[WikiChunk]:
-    """Chunk all markdown files in a wiki directory into WikiChunks with structured text."""
-    raw_chunks = chunk_markdown_directory(root)
-    chunks = []
-    for raw in raw_chunks:
-        structured = _make_structured_text(
-            collection, raw["title"], raw["section"], raw["tags"], raw["content"]
-        )
-        chunks.append(WikiChunk(
-            file=raw["file"],
-            collection=collection,
-            title=raw["title"],
-            section=raw["section"],
-            line=raw["line"],
-            content=raw["content"],
-            tags=raw["tags"],
-            structured_text=structured,
-        ))
-    return chunks
 
 
 def build_wiki_index(
@@ -66,143 +64,111 @@ def build_wiki_index(
 ) -> dict:
     """Build the wiki search index from wiki pages and sources.
 
-    Truly incremental: only re-encodes changed/new files and appends to the
-    existing PLAID index. Deleted/changed files have their old documents removed
-    before new ones are added.
+    Incremental: only re-encodes changed/new files. Removed files have their
+    old documents deleted before new ones are added.
     """
-    from agentkb.encoder import DEFAULT_MODEL
     effective_model = model_name or DEFAULT_MODEL
-
     store = IndexStore(index_dir)
 
-    old_state = {}
-    if incremental and store.exists():
-        old_state = store.load_state()
+    old_state = load_old_state(store, incremental=incremental)
+    old_state, _ = resolve_model_change(
+        store, old_state, effective_model, label="wiki", json_output=json_output,
+    )
 
-    # Model change forces full rebuild
-    if old_state and old_state.get("__model__") != effective_model:
-        echo_status(f"[agentkb] Model changed to {effective_model}, rebuilding index...", json_output=json_output)
-        old_state = {}
-        if store.exists():
-            store.clear()
+    all_files = _list_wiki_files(wiki_root)
 
-    wiki_chunks = chunk_wiki_directory(wiki_root / "wiki", collection="wiki")
-    source_chunks = chunk_wiki_directory(wiki_root / "sources", collection="wiki:source")
-    all_chunks = wiki_chunks + source_chunks
+    new_state = build_new_state(effective_model, {rel: abs_path for rel, (abs_path, _) in all_files.items()})
 
-    if not all_chunks and not old_state:
+    if not all_files and not old_state:
         echo_status("[agentkb] No wiki content to index.", json_output=json_output)
         if store.exists():
             store.close()
         return {"chunks_indexed": 0}
 
-    # Build file hash state for all current files.
-    # Chunk file paths are relative to their subdirectory (wiki/ or sources/),
-    # so resolve against wiki_root by checking both possible subdirs.
-    new_state = {"__model__": effective_model}
-    for chunk in all_chunks:
-        if chunk.file in new_state:
-            continue
-        # Try resolving through the collection subdirectory
-        subdir = "sources" if chunk.collection == "wiki:source" else "wiki"
-        fpath = wiki_root / subdir / chunk.file
-        if fpath.exists():
-            new_state[chunk.file] = file_hash(fpath)
+    diff = compute_index_diff(old_state, new_state, tracked_only=False)
+    if old_state and diff.up_to_date:
+        store.close()
+        return {"chunks_indexed": 0, "up_to_date": True}
 
-    # Determine which files changed
-    if incremental and old_state:
-        changed_files = {f for f, h in new_state.items()
-                         if not f.startswith("__") and old_state.get(f) != h}
-        new_files = {f for f in new_state
-                     if not f.startswith("__") and f not in old_state}
-        removed_files = {f for f in old_state
-                         if not f.startswith("__") and f not in new_state}
-        files_to_process = changed_files | new_files
-
-        if not files_to_process and not removed_files:
-            store.close()
-            return {"chunks_indexed": 0, "up_to_date": True}
-
+    if old_state:
         echo_status(
-            f"  Wiki: {len(new_files)} new, "
-            f"{len(changed_files)} changed, {len(removed_files)} removed",
+            f"  Wiki: {len(diff.added)} new, "
+            f"{len(diff.changed)} changed, {len(diff.removed)} removed",
             json_output=json_output,
         )
-    else:
-        files_to_process = {f for f in new_state if not f.startswith("__")}
-        removed_files = set()
 
     if not store.exists():
         store.create()
 
-    # Remove stale documents (changed or deleted files)
-    stale_files = (files_to_process & set(old_state.keys())) | removed_files
+    stale_files = (diff.files_to_process & set(old_state.keys())) | diff.removed
     if stale_files:
         store.delete_documents_by_file(stale_files)
 
-    # Only encode chunks from changed/new files
-    chunks_to_index = [c for c in all_chunks if c.file in files_to_process]
+    # Chunk only files that changed, using wiki_root as the relative base so
+    # chunk.file matches the state key exactly.
+    all_chunks: list[tuple[dict, str]] = []  # (chunk, collection)
+    for rel in diff.files_to_process:
+        abs_path, collection = all_files[rel]
+        for ch in chunk_markdown(abs_path, relative_to=wiki_root):
+            all_chunks.append((ch, collection))
 
-    if not chunks_to_index:
-        # Only removals, no new content
+    if not all_chunks:
         store.save_state(new_state)
         store.close()
-        return {"chunks_indexed": 0, "removed": len(removed_files)}
-
-    encoder = get_encoder(model_name=model_name)
-    texts = [chunk.structured_text for chunk in chunks_to_index]
-
-    echo_status(f"[agentkb] Encoding {len(texts)} wiki chunks with ColBERT...", json_output=json_output)
-    embeddings = encoder.encode_documents(texts)
+        return {"chunks_indexed": 0, "removed": len(diff.removed)}
 
     docs = []
-    for chunk in chunks_to_index:
+    texts = []
+    for raw, collection in all_chunks:
+        structured = _make_wiki_structured_text(
+            collection, raw["title"], raw["section"], raw["tags"], raw["content"]
+        )
+        texts.append(structured)
         docs.append({
-            "collection": chunk.collection,
-            "file": chunk.file,
-            "line": chunk.line,
-            "name": chunk.title,
+            "collection": collection,
+            "file": raw["file"],
+            "line": raw["line"],
+            "name": raw["title"],
             "unit_type": "chunk",
-            "content": chunk.structured_text,
-            "raw_content": chunk.content,
-            "title": chunk.title,
-            "section": chunk.section,
-            "tags": chunk.tags,
+            "content": structured,
+            "raw_content": raw["content"],
+            "title": raw["title"],
+            "section": raw["section"],
+            "tags": raw.get("tags", []),
         })
 
-    doc_ids = store.add_documents(docs)
-
-    echo_status("[agentkb] Updating PLAID index...", json_output=json_output)
-    store.append_plaid_index(doc_ids, embeddings)
+    encode_and_append(store, docs, texts, model_name=model_name, label="wiki", json_output=json_output)
     store.save_state(new_state)
     store.close()
 
     return {
-        "wiki_chunks": sum(1 for c in chunks_to_index if c.collection == "wiki"),
-        "source_chunks": sum(1 for c in chunks_to_index if c.collection == "wiki:source"),
-        "chunks_indexed": len(chunks_to_index),
+        "wiki_chunks": sum(1 for _, c in all_chunks if c == "wiki"),
+        "source_chunks": sum(1 for _, c in all_chunks if c == "wiki:source"),
+        "chunks_indexed": len(all_chunks),
     }
 
 
 def wiki_index_is_stale(wiki_root: Path, index_dir: Path) -> bool:
-    """Check if any wiki files have changed or model has changed since last index build."""
+    """Check if any wiki files have changed or the model has changed since last build.
+
+    Walks both wiki subdirs by mtime — unlike the state-based staleness check
+    used by chats/communications, this also catches brand-new files, which
+    matters for the wiki because users frequently drop new pages in.
+    """
     state_file = index_dir / "state.json"
     if not state_file.exists():
         return True
 
-    # Check model mismatch
-    import json
-    from agentkb.encoder import DEFAULT_MODEL
     try:
         state = json.loads(state_file.read_text())
-        if state.get("__model__") != DEFAULT_MODEL:
-            return True
     except (json.JSONDecodeError, OSError):
         return True
 
-    index_mtime = state_file.stat().st_mtime
+    if state.get(MODEL_KEY) != DEFAULT_MODEL:
+        return True
 
-    for subdir in ("wiki", "sources"):
+    index_mtime = state_file.stat().st_mtime
+    for subdir, _ in WIKI_ROOTS:
         d = wiki_root / subdir
         if not d.exists():
             continue

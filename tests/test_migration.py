@@ -1,6 +1,6 @@
 """Tests for sessions directory migration (flat -> per-source layout)."""
 
-from agentkb.chats.parser import migrate_sessions_layout
+from agentkb.chats.renderer import migrate_sessions_layout
 
 
 def test_migration_moves_projects_under_claude(tmp_path):

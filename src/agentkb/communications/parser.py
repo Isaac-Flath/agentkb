@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from agentkb.encoder import DEFAULT_MODEL, get_encoder
+from agentkb.encoder import DEFAULT_MODEL
+from agentkb.indexing import (
+    build_new_state,
+    compute_index_diff,
+    encode_and_append,
+    index_is_stale_from_state,
+    load_old_state,
+    resolve_model_change,
+    save_merged_state,
+)
 from agentkb.output import echo_status
 from agentkb.store import IndexStore
-from agentkb.utils import chunk_markdown, file_hash
+from agentkb.utils import chunk_markdown
 
 
 def _list_all_md(root: Path) -> dict[str, Path]:
@@ -73,77 +81,52 @@ def build_communications_index(
     Incremental: only re-encodes changed/new files.
     """
     effective_model = model_name or DEFAULT_MODEL
-
     store = IndexStore(index_dir)
 
-    old_state = {}
-    if incremental and store.exists():
-        old_state = store.load_state()
-
-    if old_state and old_state.get("__model__") != effective_model:
-        echo_status(
-            f"[agentkb] Model changed to {effective_model}, rebuilding communications index...",
-            json_output=json_output,
-        )
-        old_state = {}
+    old_state = load_old_state(store, incremental=incremental)
+    old_state, forced_full = resolve_model_change(
+        store, old_state, effective_model, label="communications", json_output=json_output,
+    )
+    if forced_full:
         tracked_only = False
-        if store.exists():
-            store.clear()
 
     if tracked_only and old_state:
-        all_files = {}
-        for rel_path in old_state:
-            if rel_path.startswith("__"):
-                continue
-            abs_path = readable_dir / rel_path
-            if abs_path.exists():
-                all_files[rel_path] = abs_path
+        all_files = {
+            rel: readable_dir / rel
+            for rel in old_state
+            if rel != "__model__" and (readable_dir / rel).exists()
+        }
     else:
         all_files = _list_all_md(readable_dir)
 
-    new_state = {"__model__": effective_model}
-    for rel_path, abs_path in all_files.items():
-        new_state[rel_path] = file_hash(abs_path)
+    new_state = build_new_state(effective_model, all_files)
 
     if not all_files and not old_state:
         echo_status("[agentkb] No communications found.", json_output=json_output)
         return {"files_parsed": 0, "chunks_indexed": 0}
 
+    diff = compute_index_diff(old_state, new_state, tracked_only=tracked_only)
+    if old_state and diff.up_to_date:
+        store.close()
+        return {"files_parsed": 0, "chunks_indexed": 0, "up_to_date": True}
+
     if old_state:
-        changed = {f for f, h in new_state.items()
-                   if not f.startswith("__") and old_state.get(f) != h}
-        new_files = {f for f in new_state
-                     if not f.startswith("__") and f not in old_state}
-        removed = {f for f in old_state
-                   if not f.startswith("__") and f not in new_state}
-        if tracked_only:
-            new_files = set()
-            removed = set()
-        to_process = changed | new_files
-
-        if not to_process and not removed:
-            store.close()
-            return {"files_parsed": 0, "chunks_indexed": 0, "up_to_date": True}
-
         echo_status(
-            f"[agentkb] Communications index: {len(new_files)} new, "
-            f"{len(changed)} changed, {len(removed)} removed",
+            f"[agentkb] Communications index: {len(diff.added)} new, "
+            f"{len(diff.changed)} changed, {len(diff.removed)} removed",
             json_output=json_output,
         )
-    else:
-        to_process = set(all_files.keys())
-        removed = set()
 
     if not store.exists():
         store.create()
 
-    stale = (to_process & set(old_state.keys())) | removed
+    stale = (diff.files_to_process & set(old_state.keys())) | diff.removed
     if stale:
         store.delete_documents_by_file(stale)
 
     all_chunks = []
     per_chunk_meta = []
-    for rel_path in to_process:
+    for rel_path in diff.files_to_process:
         abs_path = all_files[rel_path]
         fm_meta = _extract_frontmatter_meta(abs_path)
         chunks = chunk_markdown(abs_path, relative_to=readable_dir)
@@ -152,85 +135,42 @@ def build_communications_index(
             per_chunk_meta.append(fm_meta)
 
     echo_status(
-        f"  Parsed {len(to_process)} files, found {len(all_chunks)} new chunks",
+        f"  Parsed {len(diff.files_to_process)} files, found {len(all_chunks)} new chunks",
         json_output=json_output,
     )
 
-    if all_chunks:
-        encoder = get_encoder(model_name=model_name)
-
-        docs = []
-        texts = []
-        for raw, fm in zip(all_chunks, per_chunk_meta):
-            structured = _make_communications_structured_text(
-                raw["title"], raw["section"], raw["tags"], raw["content"],
-                handle=fm.get("handle", ""),
-                source=fm.get("source", "unknown"),
-            )
-            texts.append(structured)
-            docs.append({
-                "collection": "communications",
-                "file": raw["file"],
-                "line": raw["line"],
-                "name": raw["title"],
-                "unit_type": "chunk",
-                "content": structured,
-                "raw_content": raw["content"],
-                "title": raw["title"],
-                "section": raw["section"],
-                "tags": raw.get("tags", []),
-            })
-
-        echo_status(
-            f"[agentkb] Encoding {len(texts)} communication chunks with ColBERT...",
-            json_output=json_output,
+    docs = []
+    texts = []
+    for raw, fm in zip(all_chunks, per_chunk_meta):
+        structured = _make_communications_structured_text(
+            raw["title"], raw["section"], raw["tags"], raw["content"],
+            handle=fm.get("handle", ""),
+            source=fm.get("source", "unknown"),
         )
-        embeddings = encoder.encode_documents(texts)
+        texts.append(structured)
+        docs.append({
+            "collection": "communications",
+            "file": raw["file"],
+            "line": raw["line"],
+            "name": raw["title"],
+            "unit_type": "chunk",
+            "content": structured,
+            "raw_content": raw["content"],
+            "title": raw["title"],
+            "section": raw["section"],
+            "tags": raw.get("tags", []),
+        })
 
-        doc_ids = store.add_documents(docs)
-
-        echo_status("[agentkb] Updating PLAID index...", json_output=json_output)
-        store.append_plaid_index(doc_ids, embeddings)
-
-    if tracked_only and old_state:
-        merged_state = dict(old_state)
-        merged_state.update(new_state)
-        store.save_state(merged_state)
-    else:
-        store.save_state(new_state)
+    encode_and_append(store, docs, texts, model_name=model_name, label="communication", json_output=json_output)
+    save_merged_state(store, old_state, new_state, tracked_only=tracked_only)
     store.close()
 
     return {
-        "files_parsed": len(to_process),
+        "files_parsed": len(diff.files_to_process),
         "chunks_indexed": len(all_chunks),
     }
 
 
 def communications_index_is_stale(readable_dir: Path, index_dir: Path) -> bool:
-    """Check whether any tracked readable file has changed since last index build."""
-    state_file = index_dir / "state.json"
-    if not state_file.exists():
-        return False
-
-    index_mtime = state_file.stat().st_mtime
-    if not readable_dir.exists():
-        return False
-
-    try:
-        state = json.loads(state_file.read_text())
-    except (json.JSONDecodeError, OSError):
-        return True
-
-    if state.get("__model__") != DEFAULT_MODEL:
-        return True
-
-    for rel_path in state:
-        if rel_path.startswith("__"):
-            continue
-        abs_path = readable_dir / rel_path
-        if not abs_path.exists():
-            return True
-        if abs_path.stat().st_mtime > index_mtime:
-            return True
-
-    return False
+    """Return True if any tracked readable file has changed since last index build."""
+    return index_is_stale_from_state(readable_dir, index_dir)

@@ -57,13 +57,13 @@ def test_chats_list_json_returns_metadata(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli.paths, "chats_sessions_dir", lambda: sessions_dir)
     monkeypatch.setattr(cli.paths, "chats_readable_dir", lambda: readable_dir)
-    monkeypatch.setattr("agentkb.chats.parser.migrate_sessions_layout", lambda _sessions_dir: False)
+    monkeypatch.setattr("agentkb.chats.renderer.migrate_sessions_layout", lambda _sessions_dir: False)
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_all_sessions",
+        "agentkb.chats.renderer.export_all_sessions",
         lambda _sessions_dir, project_filter=None: {"copied": 0, "skipped": 0, "total": 0},
     )
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_readable",
+        "agentkb.chats.renderer.export_readable",
         lambda _sessions_dir, _readable_dir, project_filter=None: {"generated": 0, "skipped": 0, "total": 0},
     )
 
@@ -99,13 +99,13 @@ def test_chats_show_json_returns_content(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli.paths, "chats_sessions_dir", lambda: sessions_dir)
     monkeypatch.setattr(cli.paths, "chats_readable_dir", lambda: readable_dir)
-    monkeypatch.setattr("agentkb.chats.parser.migrate_sessions_layout", lambda _sessions_dir: False)
+    monkeypatch.setattr("agentkb.chats.renderer.migrate_sessions_layout", lambda _sessions_dir: False)
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_all_sessions",
+        "agentkb.chats.renderer.export_all_sessions",
         lambda _sessions_dir, project_filter=None: {"copied": 0, "skipped": 0, "total": 0},
     )
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_readable",
+        "agentkb.chats.renderer.export_readable",
         lambda _sessions_dir, _readable_dir, project_filter=None: {"generated": 0, "skipped": 0, "total": 0},
     )
 
@@ -127,13 +127,13 @@ def test_chats_show_rejects_path_escape(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli.paths, "chats_sessions_dir", lambda: sessions_dir)
     monkeypatch.setattr(cli.paths, "chats_readable_dir", lambda: readable_dir)
-    monkeypatch.setattr("agentkb.chats.parser.migrate_sessions_layout", lambda _sessions_dir: False)
+    monkeypatch.setattr("agentkb.chats.renderer.migrate_sessions_layout", lambda _sessions_dir: False)
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_all_sessions",
+        "agentkb.chats.renderer.export_all_sessions",
         lambda _sessions_dir, project_filter=None: {"copied": 0, "skipped": 0, "total": 0},
     )
     monkeypatch.setattr(
-        "agentkb.chats.parser.export_readable",
+        "agentkb.chats.renderer.export_readable",
         lambda _sessions_dir, _readable_dir, project_filter=None: {"generated": 0, "skipped": 0, "total": 0},
     )
 

@@ -18,7 +18,7 @@ def chats():
 
 def _ensure_readable_exports(project_filter: str | None = None) -> Path:
     """Refresh agentkb-owned session copies and readable markdown exports."""
-    from agentkb.chats.parser import export_all_sessions, export_readable, migrate_sessions_layout
+    from agentkb.chats.renderer import export_all_sessions, export_readable, migrate_sessions_layout
 
     sessions_dir = paths.chats_sessions_dir()
     readable_dir = paths.chats_readable_dir()
@@ -160,7 +160,7 @@ def chats_export(project):
     Copies JSONL from each registered source (Claude Code, Pi, etc.) into
     sessions/{source}/, then generates readable markdown in readable/.
     """
-    from agentkb.chats.parser import export_all_sessions, migrate_sessions_layout, export_readable
+    from agentkb.chats.renderer import export_all_sessions, migrate_sessions_layout, export_readable
 
     sessions_dir = paths.chats_sessions_dir()
     readable_dir = paths.chats_readable_dir()
@@ -198,7 +198,8 @@ def chats_index(model, project):
     Runs full pipeline: copy JSONL -> generate readable markdown -> build search index.
     The search index is built from the readable markdown, not raw JSONL.
     """
-    from agentkb.chats.parser import export_all_sessions, migrate_sessions_layout, export_readable, build_chat_index
+    from agentkb.chats.renderer import export_all_sessions, migrate_sessions_layout, export_readable
+    from agentkb.chats.parser import build_chat_index
 
     sessions_dir = paths.chats_sessions_dir()
     readable_dir = paths.chats_readable_dir()
