@@ -6,8 +6,9 @@ Endpoints used:
   - GET /2/users/{id}/tweets              (user timeline, since_id cursor)
 
 The /2/users/{id}/following endpoint requires OAuth 2.0 user context, not
-app-only, so we manage handles explicitly via `agentkb communications x add-handle`
-rather than auto-syncing the follow list.
+app-only, so handles are managed explicitly by editing
+``~/.agentkb/communications/raw/x/_handles.json`` rather than auto-syncing
+the follow list.
 
 Filtering: we skip retweets and replies-to-other-users. Originals, self-reply
 threads, and quote-tweets are kept.
@@ -213,7 +214,10 @@ def fetch_handle_tweets(raw_dir: Path, username: str, *, max_pages: int | None =
     handles = load_handles(raw_dir)
     entry = handles.get(username)
     if not entry:
-        raise RuntimeError(f"Handle @{username} is not registered. Run `agentkb communications x add-handle {username}` first.")
+        raise RuntimeError(
+            f"Handle @{username} is not registered. Add it to "
+            f"~/.agentkb/communications/raw/x/_handles.json first."
+        )
     user_id = entry["user_id"]
     handle_dir = raw_dir / username
     handle_dir.mkdir(parents=True, exist_ok=True)

@@ -99,8 +99,8 @@ def test_get_document_by_id_missing(tmp_path):
     store.close()
 
 
-def test_get_documents_by_collection(tmp_path):
-    """Filters documents by collection name.
+def test_get_document_ids_by_collection(tmp_path):
+    """Filters document IDs by collection name.
 
     When searching with --scope wiki, only wiki and wiki:source documents
     are considered. This collection filter is how that scoping works.
@@ -113,12 +113,9 @@ def test_get_documents_by_collection(tmp_path):
         {"collection": "wiki", "file": "c.md", "content": "more wiki"},
     ])
 
-    wiki_docs = store.get_documents(collection="wiki")
-    assert len(wiki_docs) == 2
-    chat_docs = store.get_documents(collection="chats")
-    assert len(chat_docs) == 1
-    all_docs = store.get_documents()
-    assert len(all_docs) == 3
+    assert len(store.get_document_ids(collection="wiki")) == 2
+    assert len(store.get_document_ids(collection="chats")) == 1
+    assert len(store.get_document_ids()) == 3
     store.close()
 
 
@@ -157,8 +154,8 @@ def test_delete_documents_by_file(tmp_path):
 
     store.delete_documents_by_file({"remove.md"})
     assert store.document_count() == 1
-    remaining = store.get_documents()
-    assert remaining[0].file == "keep.md"
+    [remaining_id] = store.get_document_ids()
+    assert store.get_document_by_id(remaining_id).file == "keep.md"
     store.close()
 
 

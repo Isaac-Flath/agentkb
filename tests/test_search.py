@@ -331,7 +331,7 @@ def test_cli_search_json_chat_reindex_stays_valid_json(monkeypatch, tmp_path):
     seen = {}
 
     def fake_build_chat_index(projects_dir, index_dir, model_name=None, incremental=True,
-                              project_filter=None, tracked_only=False, json_output=False):
+                              rebuild=False, tracked_only=False, json_output=False):
         seen["json_output"] = json_output
         echo_status("[agentkb] Chat index: fake rebuild", json_output=json_output)
         index_dir.mkdir(parents=True, exist_ok=True)

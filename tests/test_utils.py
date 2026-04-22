@@ -12,10 +12,8 @@ from agentkb.utils import (
     file_hash,
     parse_frontmatter,
     strip_frontmatter,
-    extract_wikilinks,
     parse_page,
     chunk_markdown,
-    chunk_markdown_directory,
 )
 
 
@@ -83,38 +81,18 @@ def test_strip_frontmatter_no_frontmatter():
     assert strip_frontmatter("No frontmatter") == "No frontmatter"
 
 
-# --- extract_wikilinks ---
-# Wiki pages can reference each other with [[wikilinks]]. These are extracted
-# to build cross-references between pages (e.g., a Go concurrency page linking
-# to a CRDT page where the lesson was originally learned).
-
-
-def test_extract_wikilinks():
-    """Finds [[wikilink]] patterns in content."""
-    text = "See [[Go Concurrency]] and also [[DaVinci Resolve API]]."
-    links = extract_wikilinks(text)
-    assert links == ["Go Concurrency", "DaVinci Resolve API"]
-
-
-def test_extract_wikilinks_none():
-    """Returns empty list when no wikilinks."""
-    assert extract_wikilinks("No links here") == []
-
-
 # --- parse_page ---
-# parse_page combines frontmatter extraction and wikilink extraction into
-# a single metadata dict for a markdown file. This is used during indexing
-# to attach title, tags, and link info to each chunk.
+# parse_page pulls title and tags out of optional YAML frontmatter for each
+# markdown file. chunk_markdown uses it so each chunk carries page-level metadata.
 
 
 def test_parse_page_with_frontmatter(tmp_path):
-    """parse_page extracts title, tags, wikilinks from a markdown file."""
+    """parse_page extracts title and tags from frontmatter."""
     p = tmp_path / "my-page.md"
-    p.write_text("---\ntitle: My Page\ntags: [python]\n---\n\nSee [[Other Page]].")
+    p.write_text("---\ntitle: My Page\ntags: [python]\n---\n\nBody.")
     result = parse_page(p, p.read_text())
     assert result["title"] == "My Page"
     assert result["tags"] == ["python"]
-    assert result["wikilinks"] == ["Other Page"]
 
 
 def test_parse_page_no_frontmatter(tmp_path):
@@ -213,25 +191,3 @@ def test_chunk_markdown_with_frontmatter(tmp_path):
     assert "---" not in chunks[0]["content"]
 
 
-# --- chunk_markdown_directory ---
-# Convenience wrapper that recursively finds all .md files in a directory
-# and chunks them all. Used by both wiki and chat indexing to process
-# their respective directories in one call.
-
-
-def test_chunk_markdown_directory(tmp_path):
-    """Recursively chunks all .md files in a directory."""
-    (tmp_path / "a.md").write_text("# Page A\n\nContent A")
-    sub = tmp_path / "sub"
-    sub.mkdir()
-    (sub / "b.md").write_text("# Page B\n\nContent B")
-
-    chunks = chunk_markdown_directory(tmp_path)
-    files = {c["file"] for c in chunks}
-    assert "a.md" in files
-    assert "sub/b.md" in files
-
-
-def test_chunk_markdown_directory_nonexistent(tmp_path):
-    """Returns empty list for a directory that doesn't exist."""
-    assert chunk_markdown_directory(tmp_path / "nope") == []

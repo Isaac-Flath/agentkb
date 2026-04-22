@@ -57,7 +57,7 @@ def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
     return IndexStore(index_dir) if index_dir.exists() else None
 
 
-def reindex(*, model: str | None = None, fetch: bool = True) -> dict:
+def reindex(*, model: str | None = None, fetch: bool = True, rebuild: bool = False) -> dict:
     """Optionally fetch from source APIs, then re-render and rebuild the index.
 
     Per-source fetch failures are logged to stderr and don't abort the run.
@@ -87,7 +87,7 @@ def reindex(*, model: str | None = None, fetch: bool = True) -> dict:
     _, readable_dir, index_dir = _render_from_raw()
     if not readable_dir.exists():
         return {}
-    return build_communications_index(readable_dir, index_dir, model_name=model)
+    return build_communications_index(readable_dir, index_dir, model_name=model, rebuild=rebuild)
 
 
 def status_lines() -> list[str]:

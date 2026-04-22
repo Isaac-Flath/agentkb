@@ -41,6 +41,15 @@ def _git_cache_dir() -> Path:
     return paths.agentkb_home() / "references" / "_cache"
 
 
+def _run_git(*args: str) -> subprocess.CompletedProcess:
+    """Run git, capturing output and surfacing stderr on failure."""
+    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip() or "(no stderr)"
+        raise RuntimeError(f"git {' '.join(args)} failed: {stderr}")
+    return result
+
+
 def _fetch_git(ref: Ref, dest: Path) -> str:
     """Clone or pull into a cache, then mirror ``subpath`` (or everything) into dest.
 
@@ -51,24 +60,12 @@ def _fetch_git(ref: Ref, dest: Path) -> str:
     cache.parent.mkdir(parents=True, exist_ok=True)
 
     if (cache / ".git").exists():
-        subprocess.run(
-            ["git", "-C", str(cache), "fetch", "--depth=1", "origin"],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(cache), "reset", "--hard", "origin/HEAD"],
-            check=True, capture_output=True,
-        )
+        _run_git("-C", str(cache), "fetch", "--depth=1", "origin")
+        _run_git("-C", str(cache), "reset", "--hard", "origin/HEAD")
     else:
-        subprocess.run(
-            ["git", "clone", "--depth=1", ref.source, str(cache)],
-            check=True, capture_output=True,
-        )
+        _run_git("clone", "--depth=1", ref.source, str(cache))
 
-    commit = subprocess.run(
-        ["git", "-C", str(cache), "rev-parse", "HEAD"],
-        check=True, capture_output=True, text=True,
-    ).stdout.strip()
+    commit = _run_git("-C", str(cache), "rev-parse", "HEAD").stdout.strip()
 
     src_root = cache / ref.subpath if ref.subpath else cache
     if not src_root.exists():
@@ -106,7 +103,7 @@ def _mirror_tree(src: Path, dest: Path) -> None:
 def _fetch_url(ref: Ref, dest: Path) -> None:
     """Fetch a single URL. Save raw HTML + converted markdown side by side."""
     resp = requests.get(ref.source, timeout=30, headers={
-        "User-Agent": "agentkb/0.3 (+https://github.com/anthropics/agentkb)",
+        "User-Agent": "agentkb/0.3 (+https://github.com/isaacflath/agentkb)",
     })
     resp.raise_for_status()
 

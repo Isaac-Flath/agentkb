@@ -256,17 +256,6 @@ def test_list_all_jsonl(tmp_path):
     assert "my-project/session1.jsonl" in files
 
 
-def test_list_all_jsonl_with_filter(tmp_path):
-    """project_filter restricts to matching project directories."""
-    (tmp_path / "alpha").mkdir()
-    (tmp_path / "alpha" / "s.jsonl").write_text("{}")
-    (tmp_path / "beta").mkdir()
-    (tmp_path / "beta" / "s.jsonl").write_text("{}")
-
-    files = list_all_jsonl(tmp_path, project_filter="alpha")
-    assert len(files) == 1
-
-
 # --- export_sessions ---
 # export_sessions copies JSONL files from Claude Code's directory to agentkb's
 # own sessions/ directory. This is incremental — it uses file_hash to skip files
@@ -336,7 +325,7 @@ def test_build_chat_index_json_output_writes_progress_to_stderr(monkeypatch, tmp
     readable_dir.mkdir(parents=True)
     (readable_dir / "session.md").write_text("---\ntitle: Session\n---\n\n# Topic\n\nDiscussion")
 
-    monkeypatch.setattr(chats_parser, "IndexStore", _FakeStore)
+    monkeypatch.setattr("agentkb.indexing.IndexStore", _FakeStore)
     monkeypatch.setattr("agentkb.indexing.get_encoder", lambda model_name=None: _FakeEncoder())
 
     stdout = StringIO()
@@ -348,9 +337,8 @@ def test_build_chat_index_json_output_writes_progress_to_stderr(monkeypatch, tmp
             json_output=True,
         )
 
-    assert stats["sessions_parsed"] == 1
     assert stats["chunks_indexed"] == 1
     assert stdout.getvalue() == ""
-    assert "Parsed 1 sessions, found 1 new chunks" in stderr.getvalue()
+    assert "Parsed 1 chat files, found 1 new chunks" in stderr.getvalue()
     assert "Encoding 1 chat chunks with ColBERT" in stderr.getvalue()
     assert "Updating PLAID index" in stderr.getvalue()

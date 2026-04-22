@@ -1,10 +1,9 @@
-"""Shared utilities: file hashing, markdown parsing, markdown chunking, and time filters."""
+"""Shared utilities: file hashing, markdown parsing, and markdown chunking."""
 
 from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -42,34 +41,16 @@ def strip_frontmatter(text: str) -> str:
     return rest[end + 4:].lstrip("\n")
 
 
-def extract_wikilinks(content: str) -> list[str]:
-    """Extract [[wikilinks]] from markdown content."""
-    return re.findall(r"\[\[([^\]]+)\]\]", content)
-
-
 def parse_page(path: Path, content: str) -> dict:
-    """Parse a markdown page, extracting optional YAML frontmatter and wikilinks."""
+    """Parse a markdown page, returning title and tags from optional YAML frontmatter."""
     fm = parse_frontmatter(content)
-    wikilinks = extract_wikilinks(content)
 
     title = fm.get("title", "") or path.stem
-    page_type = fm.get("type", "")
     tags = fm.get("tags", []) or []
-    sources = fm.get("sources", []) or []
-
     if isinstance(tags, str):
         tags = [tags]
-    if isinstance(sources, str):
-        sources = [sources]
 
-    return {
-        "file": path,
-        "title": title,
-        "type": page_type,
-        "tags": tags,
-        "sources": sources,
-        "wikilinks": wikilinks,
-    }
+    return {"title": title, "tags": tags}
 
 
 RST_UNDERLINE_CHARS = set("=-~^\"'`*+#<>:")
@@ -88,12 +69,16 @@ def _find_markdown_headings(lines: list[str]) -> list[tuple[int, int, str]]:
 def _find_rst_headings(lines: list[str]) -> list[tuple[int, int, str]]:
     """Return list of ``(line_index, level, heading_text)`` for rST headings.
 
-    rST headings are a text line followed by an underline of ``=``/``-``/``~``
-    (any punctuation in RST_UNDERLINE_CHARS works) at least as long as the
-    heading text. Overlined headings (punctuation line above AND below) are
-    also recognized. Levels are assigned in order of first appearance of each
-    underline character — the first distinct character is level 1, the next
-    distinct character is level 2, etc. (matches Sphinx convention.)
+    Scans for a text line immediately followed by an underline of a single
+    repeated char (``=``/``-``/``~`` etc., see ``RST_UNDERLINE_CHARS``) at
+    least as long as the heading. Overlined headings still get picked up —
+    the overline doesn't match (its "text" is all punctuation and its
+    following line is the title text, not an underline), but the next
+    iteration catches the title + bottom underline pair.
+
+    Levels follow Sphinx's "first-seen" convention: the first distinct
+    underline char encountered becomes level 1, the next distinct char
+    becomes level 2, etc.
     """
     first_seen: dict[str, int] = {}
     headings: list[tuple[int, int, str]] = []
@@ -182,87 +167,3 @@ def chunk_markdown(
     return chunks
 
 
-def parse_time_filter(value: str | None, *, end_of_day: bool = False) -> datetime | None:
-    """Parse ISO dates/times and simple relative phrases like "7 days".
-
-    Supported forms:
-    - YYYY-MM-DD
-    - ISO datetime strings, with optional trailing Z
-    - today / yesterday
-    - N minutes / hours / days / weeks
-    """
-    if value is None:
-        return None
-
-    raw = value.strip()
-    if not raw:
-        return None
-
-    lowered = raw.lower()
-    now = datetime.now(timezone.utc)
-
-    if lowered == "today":
-        base_date = now.date()
-        chosen_time = time.max if end_of_day else time.min
-        return datetime.combine(base_date, chosen_time, tzinfo=timezone.utc)
-
-    if lowered == "yesterday":
-        base_date = now.date() - timedelta(days=1)
-        chosen_time = time.max if end_of_day else time.min
-        return datetime.combine(base_date, chosen_time, tzinfo=timezone.utc)
-
-    relative_match = re.fullmatch(
-        r"(\d+)\s*(minute|minutes|hour|hours|day|days|week|weeks)",
-        lowered,
-    )
-    if relative_match:
-        amount = int(relative_match.group(1))
-        unit = relative_match.group(2)
-        match unit:
-            case "minute" | "minutes":
-                delta = timedelta(minutes=amount)
-            case "hour" | "hours":
-                delta = timedelta(hours=amount)
-            case "week" | "weeks":
-                delta = timedelta(weeks=amount)
-            case _:
-                delta = timedelta(days=amount)
-        return now - delta
-
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported time filter: {value!r}. Use ISO dates/times or phrases like '7 days'."
-        ) from exc
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
-
-    if len(raw) == 10 and "T" not in raw and " " not in raw:
-        if end_of_day:
-            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
-        else:
-            parsed = parsed.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    return parsed
-
-
-def chunk_markdown_directory(root: Path) -> list[dict]:
-    """Chunk all markdown files in a directory."""
-    import sys
-
-    chunks = []
-    if not root.exists():
-        return chunks
-
-    for md_file in sorted(root.rglob("*.md")):
-        try:
-            chunks.extend(chunk_markdown(md_file, relative_to=root))
-        except Exception as e:
-            print(f"[agentkb] Warning: failed to chunk {md_file}: {e}", file=sys.stderr)
-
-    return chunks

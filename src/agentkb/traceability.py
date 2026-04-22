@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import boto3
+from botocore.exceptions import ClientError
+
 from agentkb.config import paths
 
 
@@ -204,8 +207,6 @@ def _s3_config() -> tuple[str, str]:
 
 def push_s3(verbose: bool = False) -> str:
     """Upload traceability.db to S3. Returns status string."""
-    import boto3
-
     bucket, key = _s3_config()
     db = _db_path()
     if not db.exists():
@@ -221,9 +222,6 @@ def push_s3(verbose: bool = False) -> str:
 
 def pull_s3(verbose: bool = False) -> str:
     """Download traceability.db from S3. Returns status string."""
-    import boto3
-    from botocore.exceptions import ClientError
-
     bucket, key = _s3_config()
     db = _db_path()
     db.parent.mkdir(parents=True, exist_ok=True)

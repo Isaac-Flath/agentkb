@@ -123,29 +123,6 @@ class IndexStore:
         conn.commit()
         return ids
 
-    def build_plaid_index(self, doc_ids: list[int], embeddings: list[np.ndarray]):
-        """Build a PLAID index from document embeddings.
-
-        Uses pylate's PLAID wrapper around fast-plaid (Rust).
-        """
-        from pylate import indexes
-
-        # PLAID needs string IDs
-        str_ids = [str(did) for did in doc_ids]
-
-        index = indexes.PLAID(
-            index_folder=str(self.index_dir),
-            index_name="plaid",
-            override=True,
-        )
-
-        index.add_documents(
-            documents_ids=str_ids,
-            documents_embeddings=embeddings,
-        )
-
-        self._plaid_index = index
-
     def _load_plaid_index(self):
         """Load the PLAID index from disk."""
         if self._plaid_index is not None:
@@ -181,18 +158,6 @@ class IndexStore:
 
         # results is [[{"id": str, "score": float}, ...]]
         return [(int(r["id"]), r["score"]) for r in results[0]]
-
-    def get_documents(self, collection: str | None = None) -> list[Document]:
-        """Get all documents, optionally filtered by collection."""
-        conn = self._connect()
-        if collection:
-            rows = conn.execute(
-                "SELECT * FROM documents WHERE collection = ? ORDER BY id",
-                (collection,),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM documents ORDER BY id").fetchall()
-        return [Document(**dict(row)) for row in rows]
 
     def get_document_ids(self, collection: str | None = None) -> list[int]:
         """Get document IDs, optionally filtered by collection."""

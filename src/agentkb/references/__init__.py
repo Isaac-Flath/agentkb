@@ -7,7 +7,7 @@ the narrower ``-s wiki:source``.
 
 from __future__ import annotations
 
-from pathlib import Path
+import shutil
 
 from agentkb.output import echo_status
 from agentkb.references import manifest as manifest_mod
@@ -45,7 +45,6 @@ def remove(ref_id: str) -> bool:
     refs = [r for r in refs if r.id != ref_id]
     manifest_mod.save(refs)
 
-    import shutil
     dest = refs_root() / ref_id
     if dest.exists():
         shutil.rmtree(dest)

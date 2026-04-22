@@ -29,13 +29,3 @@ SOURCES: dict[str, CommunicationSource] = {}
 def register(source: CommunicationSource):
     """Register a communication source."""
     SOURCES[source.name] = source
-
-
-def get_all_sources() -> list[CommunicationSource]:
-    """Return all registered sources."""
-    return list(SOURCES.values())
-
-
-def get_source(name: str) -> CommunicationSource:
-    """Get a source by name."""
-    return SOURCES[name]

@@ -10,9 +10,19 @@ this chunk is about Git rebasing from the wiki).
 
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 
 import agentkb.wiki.parser as wiki_parser
+from agentkb.indexing import FileEntry
 from agentkb.wiki.parser import _make_wiki_structured_text
+
+
+def _chunk(title="Git Tips", section="Rebasing", tags=None, content="How to rebase") -> dict:
+    return {"title": title, "section": section, "tags": tags or [], "content": content}
+
+
+def _entry(collection="wiki") -> FileEntry:
+    return FileEntry(path=Path("x.md"), collection=collection)
 
 
 # --- _make_wiki_structured_text ---
@@ -24,7 +34,7 @@ from agentkb.wiki.parser import _make_wiki_structured_text
 
 def test_structured_text_basic():
     """Produces '[collection] Title > Section' header followed by content."""
-    result = _make_wiki_structured_text("wiki", "Git Tips", "Rebasing", ["tools"], "How to rebase")
+    result = _make_wiki_structured_text(_chunk(tags=["tools"]), _entry())
     assert "[wiki] Git Tips > Rebasing" in result
     assert "Tags: tools" in result
     assert "How to rebase" in result
@@ -32,14 +42,18 @@ def test_structured_text_basic():
 
 def test_structured_text_full_page():
     """Omits section label when section is '(full page)'."""
-    result = _make_wiki_structured_text("wiki", "Page", "(full page)", [], "Content")
+    result = _make_wiki_structured_text(
+        _chunk(title="Page", section="(full page)", content="Content"), _entry(),
+    )
     assert "> (full page)" not in result
     assert "[wiki] Page" in result
 
 
 def test_structured_text_no_tags():
     """No Tags line when tags list is empty."""
-    result = _make_wiki_structured_text("wiki", "Page", "Sec", [], "Content")
+    result = _make_wiki_structured_text(
+        _chunk(title="Page", section="Sec", content="Content"), _entry(),
+    )
     assert "Tags:" not in result
 
 
@@ -95,7 +109,7 @@ def test_build_wiki_index_json_output_writes_progress_to_stderr(monkeypatch, tmp
     (wiki_root / "sources").mkdir()
     (wiki_root / "wiki" / "page.md").write_text("---\ntitle: My Page\n---\n\n# Section\n\nBody text")
 
-    monkeypatch.setattr(wiki_parser, "IndexStore", _FakeStore)
+    monkeypatch.setattr("agentkb.indexing.IndexStore", _FakeStore)
     monkeypatch.setattr("agentkb.indexing.get_encoder", lambda model_name=None: _FakeEncoder())
 
     stdout = StringIO()
@@ -121,11 +135,10 @@ def test_build_wiki_index_namespaces_state_keys_by_subdir(monkeypatch, tmp_path)
     (wiki_root / "wiki" / "foo.md").write_text("# Wiki foo\n\nPage body")
     (wiki_root / "sources" / "foo.md").write_text("# Source foo\n\nSource body")
 
-    monkeypatch.setattr(wiki_parser, "IndexStore", _FakeStore)
     monkeypatch.setattr("agentkb.indexing.get_encoder", lambda model_name=None: _FakeEncoder())
 
     fake = _FakeStore(wiki_root / ".index")
-    monkeypatch.setattr(wiki_parser, "IndexStore", lambda _index_dir: fake)
+    monkeypatch.setattr("agentkb.indexing.IndexStore", lambda _index_dir: fake)
 
     stats = wiki_parser.build_wiki_index(wiki_root, wiki_root / ".index")
 

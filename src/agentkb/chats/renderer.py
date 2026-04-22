@@ -41,10 +41,7 @@ def _summarize_tool_input(tool_name: str, tool_input: dict) -> str:
 # --- File discovery ---
 
 
-def list_all_jsonl(
-    projects_dir: Path,
-    project_filter: str | None = None,
-) -> dict[str, Path]:
+def list_all_jsonl(projects_dir: Path) -> dict[str, Path]:
     """List all JSONL files under a source dir, keyed by "project/session.jsonl"."""
     files = {}
     if not projects_dir.exists():
@@ -53,13 +50,8 @@ def list_all_jsonl(
     for proj_entry in sorted(projects_dir.iterdir()):
         if not proj_entry.is_dir():
             continue
-
-        project_name = proj_entry.name
-        if project_filter and project_filter not in project_name:
-            continue
-
         for jsonl_file in sorted(proj_entry.glob("*.jsonl")):
-            files[f"{project_name}/{jsonl_file.name}"] = jsonl_file
+            files[f"{proj_entry.name}/{jsonl_file.name}"] = jsonl_file
 
     return files
 
@@ -273,16 +265,12 @@ def render_session_markdown(
 # --- Copy + render pipeline ---
 
 
-def export_sessions(
-    source_dir: Path,
-    dest_dir: Path,
-    project_filter: str | None = None,
-) -> dict:
+def export_sessions(source_dir: Path, dest_dir: Path) -> dict:
     """Copy JSONL from source (e.g. ~/.claude/projects/) to dest.
 
     Incremental: only copies files whose content hash has changed.
     """
-    source_files = list_all_jsonl(source_dir, project_filter=project_filter)
+    source_files = list_all_jsonl(source_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     copied = 0
@@ -301,31 +289,24 @@ def export_sessions(
     return {"copied": copied, "skipped": skipped, "total": len(source_files)}
 
 
-def export_all_sessions(
-    sessions_dir: Path,
-    project_filter: str | None = None,
-) -> dict:
+def export_all_sessions(sessions_dir: Path) -> dict:
     """Export sessions from all registered chat sources into sessions/{source}/."""
-    from agentkb.chats.sources import get_all_sources
+    from agentkb.chats.sources import SOURCES
 
     total = {"copied": 0, "skipped": 0, "total": 0}
-    for source in get_all_sources():
+    for source in SOURCES.values():
         src_dir = source.source_dir()
         if src_dir is None or not src_dir.exists():
             continue
         dest = sessions_dir / source.name
-        stats = export_sessions(src_dir, dest, project_filter=project_filter)
+        stats = export_sessions(src_dir, dest)
         total["copied"] += stats["copied"]
         total["skipped"] += stats["skipped"]
         total["total"] += stats["total"]
     return total
 
 
-def export_readable(
-    sessions_dir: Path,
-    readable_dir: Path,
-    project_filter: str | None = None,
-) -> dict:
+def export_readable(sessions_dir: Path, readable_dir: Path) -> dict:
     """Generate readable markdown files from JSONL sessions.
 
     Iterates over source subdirectories (sessions/claude/, sessions/pi/, etc.),
@@ -348,7 +329,7 @@ def export_readable(
         src_name = source_subdir.name
         if src_name not in SOURCES:
             continue
-        for rel_path, abs_path in list_all_jsonl(source_subdir, project_filter=project_filter).items():
+        for rel_path, abs_path in list_all_jsonl(source_subdir).items():
             source_files[f"{src_name}/{rel_path}"] = (abs_path, src_name)
 
     state_path = readable_dir / "_state.json"

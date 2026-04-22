@@ -48,12 +48,12 @@ def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
     return IndexStore(index_dir) if index_dir.exists() else None
 
 
-def reindex(*, model: str | None = None) -> dict:
+def reindex(*, model: str | None = None, rebuild: bool = False) -> dict:
     """Run the full chats pipeline: sync JSONL, render, index. Returns build stats (or ``{}``)."""
     _, readable_dir = _sync_sessions_and_readable()
     if not readable_dir.exists():
         return {}
-    return build_chat_index(readable_dir, paths.chats_dir() / ".index", model_name=model)
+    return build_chat_index(readable_dir, paths.chats_dir() / ".index", model_name=model, rebuild=rebuild)
 
 
 def status_lines() -> list[str]:

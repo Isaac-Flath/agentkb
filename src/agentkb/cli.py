@@ -160,15 +160,19 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
 
 @main.command()
 @click.option("--model", help="Override ColBERT model name")
-@click.option("--no-fetch", is_flag=True, help="Skip network fetches (refs + communications)")
-def index(model, no_fetch):
-    """Fetch, render, and index everything (refs + wiki + chats + communications).
+@click.option("--no-fetch", is_flag=True, help="Skip all network calls (git pull/push, refs, communications)")
+@click.option("--rebuild", is_flag=True, help="Drop every store's existing index and re-encode from scratch")
+def index(model, no_fetch, rebuild):
+    """Sync, fetch, render, and index everything.
 
-    Network calls (ref syncs, X API fetches) run by default; per-source
-    failures are logged but don't abort the run. Use ``--no-fetch`` to skip
-    all network calls, or the per-store commands for granular control.
+    Default flow: ``sync pull`` → refs sync → reindex → ``sync push``, so
+    local indexes reflect the latest remote state and your updates get
+    published. Per-source failures are logged but don't abort the run.
+    Use ``--no-fetch`` to skip every network call. Use ``--rebuild`` to
+    force a full re-encode instead of the default incremental update.
     """
     if not no_fetch:
+        _sync_pull_for_index()
         from agentkb import references as refs_store
         results = refs_store.sync()
         errors = [rid for rid, status in results.items() if isinstance(status, str) and status.startswith("error")]
@@ -176,12 +180,55 @@ def index(model, no_fetch):
             click.echo(f"[agentkb] refs: {len(errors)} failed ({', '.join(errors)})")
 
     for label, stats in [
-        ("Wiki", wiki_store.reindex(model=model)),
-        ("chat", chats_store.reindex(model=model)),
-        ("communication", communications_store.reindex(model=model, fetch=not no_fetch)),
+        ("Wiki", wiki_store.reindex(model=model, rebuild=rebuild)),
+        ("chat", chats_store.reindex(model=model, rebuild=rebuild)),
+        ("communication", communications_store.reindex(model=model, fetch=not no_fetch, rebuild=rebuild)),
     ]:
         if stats.get("chunks_indexed", 0) > 0 and not stats.get("up_to_date"):
             click.echo(f"[agentkb] Indexed {stats['chunks_indexed']} {label} chunks")
+
+    if not no_fetch:
+        _sync_push_for_index()
+
+
+def _sync_pull_for_index() -> None:
+    """Pull configured git stores + traceability DB. Silent skip if unconfigured."""
+    try:
+        results = do_pull()
+    except RuntimeError:
+        results = {}
+    for name, st in results.items():
+        if isinstance(st, str) and st.startswith("error"):
+            click.echo(f"[agentkb] pull {name}: {st}")
+    try:
+        tb = pull_s3()
+        if tb.startswith("error") or tb.startswith("skipped"):
+            return
+    except RuntimeError:
+        pass  # S3 not configured.
+    except Exception as e:
+        click.echo(f"[agentkb] pull traceability: error: {e}")
+
+
+def _sync_push_for_index() -> None:
+    """Push configured git stores + traceability DB. Silent skip if unconfigured."""
+    try:
+        results = do_push()
+    except RuntimeError:
+        results = {}
+    for name, st in results.items():
+        if st == "up to date":
+            continue
+        click.echo(f"[agentkb] push {name}: {st}")
+    try:
+        tb = push_s3()
+    except RuntimeError:
+        return  # S3 not configured.
+    except Exception as e:
+        click.echo(f"[agentkb] push traceability: error: {e}")
+        return
+    if tb != "ok":
+        click.echo(f"[agentkb] push traceability: {tb}")
 
 
 # --- Cross-cutting: status ---
@@ -398,7 +445,7 @@ def _emit_consolidate_communications(since: str) -> None:
 
     Re-renders readable markdown from existing raw data (no API fetch) so the
     report paths point at current files, but never spends X credits here —
-    that's what `agentkb communications index` is for.
+    that's what `agentkb index` is for.
     """
     comms_root = paths.communications_dir()
     raw_dir = comms_root / "raw"

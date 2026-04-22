@@ -8,6 +8,15 @@ from agentkb import references
 from agentkb.references.manifest import refs_root
 
 
+def _format_status(status: str) -> str:
+    """Shorten a sync status for CLI display, but keep error messages intact."""
+    if not status or status.startswith("error"):
+        return status or "unknown"
+    if len(status) > 12:
+        return status[:12]
+    return status
+
+
 @click.group()
 def refs():
     """Manage external reference mirrors indexed into the wiki."""
@@ -31,7 +40,7 @@ def refs_add(url, ref_id, kind, subpath, refresh, sync):
     if sync:
         results = references.sync(ref.id)
         status = results.get(ref.id, "unknown")
-        click.echo(f"[agentkb] Fetched {ref.id}: {status[:12] if status and len(status) > 12 else status}")
+        click.echo(f"[agentkb] Fetched {ref.id}: {_format_status(status)}")
         click.echo(f"[agentkb] Content at: {refs_root() / ref.id}")
         click.echo("[agentkb] Run `agentkb index` to index the new content.")
 
@@ -75,7 +84,6 @@ def refs_sync(ref_id):
         click.echo("[agentkb] Nothing to sync.")
         return
     for rid, status in results.items():
-        short = status[:12] if status and len(status) > 12 and not status.startswith("error") else status
-        click.echo(f"  {rid}: {short}")
+        click.echo(f"  {rid}: {_format_status(status)}")
     click.echo()
     click.echo("[agentkb] Run `agentkb index` to pick up the changes.")

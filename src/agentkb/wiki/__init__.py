@@ -5,7 +5,6 @@ from __future__ import annotations
 from agentkb.config import paths
 from agentkb.output import echo_status
 from agentkb.store import IndexStore
-from agentkb.wiki.manager import KnowledgeBase
 from agentkb.wiki.parser import build_wiki_index, wiki_index_is_stale
 
 
@@ -26,12 +25,12 @@ def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
     return IndexStore(index_dir)
 
 
-def reindex(*, model: str | None = None) -> dict:
+def reindex(*, model: str | None = None, rebuild: bool = False) -> dict:
     """Rebuild the wiki index from disk. Returns :func:`build_wiki_index` stats (or ``{}`` if no wiki)."""
     wiki_path = paths.wiki_dir()
     if not (wiki_path.exists() and (wiki_path / "wiki").exists()):
         return {}
-    return build_wiki_index(wiki_path, wiki_path / ".index", model_name=model)
+    return build_wiki_index(wiki_path, wiki_path / ".index", model_name=model, rebuild=rebuild)
 
 
 def status_lines() -> list[str]:
@@ -40,8 +39,9 @@ def status_lines() -> list[str]:
     if not wiki_path.exists():
         return [f"  Wiki: not initialized (no directory at {wiki_path})"]
 
-    stats = KnowledgeBase(wiki_path).status()
-    lines = [f"  Wiki: {stats['wiki_pages']} pages, {stats['sources']} sources"]
+    wiki_pages = _count_md(wiki_path / "wiki")
+    sources = _count_md(wiki_path / "sources")
+    lines = [f"  Wiki: {wiki_pages} pages, {sources} sources"]
 
     index_dir = wiki_path / ".index"
     if index_dir.exists():
@@ -50,3 +50,9 @@ def status_lines() -> list[str]:
             lines.append(f"  Wiki index: {store.document_count()} chunks indexed")
             store.close()
     return lines
+
+
+def _count_md(dir_path) -> int:
+    if not dir_path.exists():
+        return 0
+    return sum(1 for f in dir_path.rglob("*.md") if f.is_file())
