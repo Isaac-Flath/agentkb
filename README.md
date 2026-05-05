@@ -61,7 +61,7 @@ Every store follows the same three-layer shape:
   wiki/sources/refs/       # refs: mirrored external prose, managed by manifest.json
   references/_cache/       # git-clone cache for git refs (bare-ish, reused across pulls)
   skills/
-    .claude/skills/        # loaded by Claude Code via --add-dir
+    .agents/skills/        # loaded by agents via --add-dir
 ```
 
 ## The stores
@@ -115,11 +115,11 @@ For git refs, always pass `--subpath` pointing at the docs directory — without
 
 ### Skills
 
-Agent skill directories (`SKILL.md` + scripts + references) synced via git. **Not indexed, not searched.** Claude Code loads them directly via `--add-dir`.
+Agent skill directories (`SKILL.md` + scripts + references) synced via git. **Not indexed, not searched.** Agents load them directly via `--add-dir`.
 
 ```
 ~/.agentkb/skills/
-  .claude/skills/
+  .agents/skills/
     content-blog/
       SKILL.md
       scripts/
@@ -129,7 +129,7 @@ Agent skill directories (`SKILL.md` + scripts + references) synced via git. **No
 
 ```bash
 ls ~/.agentkb/skills
-alias claude='claude --add-dir ~/.agentkb/skills'
+codex --add-dir ~/.agentkb/skills
 ```
 
 ## Search
