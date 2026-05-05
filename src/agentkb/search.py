@@ -6,6 +6,7 @@ import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -17,9 +18,10 @@ class SearchResult:
     """A single search result with provenance."""
 
     collection: str  # "wiki", "wiki:source", "chats"
-    file: str
+    file: str  # Absolute filesystem path for output/readback
     line: int
     score: float
+    relative_path: str = ""
     name: str = ""
     unit_type: str = ""
     content: str = ""
@@ -51,14 +53,18 @@ class SearchResult:
 
         return f"{header}\n{snippet}"
 
-    def to_json(self) -> dict:
+    def to_json(self, *, include_content: bool = False) -> dict:
         """Format for JSON output."""
         d = {
             "collection": self.collection,
             "file": self.file,
+            "path": self.file,
+            "filename": Path(self.file).name,
             "line": self.line,
             "score": round(self.score, 4),
         }
+        if self.relative_path:
+            d["relative_path"] = self.relative_path
         if self.name:
             d["name"] = self.name
         if self.unit_type:
@@ -69,7 +75,8 @@ class SearchResult:
             d["section"] = self.section
         if self.tags:
             d["tags"] = self.tags
-        d["content"] = self.raw_content or self.content
+        if include_content:
+            d["content"] = self.raw_content or self.content
         return d
 
 
@@ -267,11 +274,13 @@ def search(
             if not compiled_pattern.search(text):
                 continue
 
+        abs_file = store.resolve_file_path(doc.file)
         result = SearchResult(
             collection=doc.collection,
-            file=doc.file,
+            file=abs_file,
             line=doc.line,
             score=semantic_score_map.get(doc_id, 0.0),
+            relative_path=doc.file,
             name=doc.name,
             unit_type=doc.unit_type,
             content=doc.content,
@@ -287,7 +296,8 @@ def search(
                 "doc_id": doc_id,
                 "score": result.score,
                 "collection": doc.collection,
-                "file": doc.file,
+                "file": abs_file,
+                "relative_path": doc.file,
                 "line": doc.line,
                 "name": doc.name,
                 "title": doc.title,

@@ -137,7 +137,13 @@ def search(query, scope, pattern, fixed, word, files_only, full_content,
         all_results = per_store_results[0] if per_store_results else []
 
     if json_output:
-        click.echo(json_mod.dumps({"results": [r.to_json() for r in all_results]}, indent=2))
+        payload = {
+            "results": [
+                r.to_json(include_content=full_content)
+                for r in all_results
+            ],
+        }
+        click.echo(json_mod.dumps(payload, indent=2))
     elif files_only:
         seen = set()
         for r in all_results:
@@ -514,6 +520,4 @@ def consolidate_communications_cmd(since):
     so the report points at current readable files.
     """
     _emit_consolidate_communications(since)
-
-
 

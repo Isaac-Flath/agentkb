@@ -54,7 +54,7 @@ def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
     elif communications_index_is_stale(readable_dir, index_dir):
         build_communications_index(readable_dir, index_dir, tracked_only=True, json_output=json_output)
 
-    return IndexStore(index_dir) if index_dir.exists() else None
+    return IndexStore(index_dir, content_root=readable_dir) if index_dir.exists() else None
 
 
 def reindex(*, model: str | None = None, fetch: bool = True, rebuild: bool = False) -> dict:

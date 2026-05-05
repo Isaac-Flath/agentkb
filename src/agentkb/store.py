@@ -32,8 +32,9 @@ class Document:
 class IndexStore:
     """Manages the on-disk index: SQLite for metadata/FTS and PLAID for vector search."""
 
-    def __init__(self, index_dir: Path):
+    def __init__(self, index_dir: Path, content_root: Path | None = None):
         self.index_dir = index_dir
+        self.content_root = content_root.expanduser().resolve() if content_root else None
         self.db_path = index_dir / "metadata.db"
         self.plaid_dir = index_dir / "plaid"
         self.state_path = index_dir / "state.json"
@@ -175,6 +176,15 @@ class IndexStore:
         conn = self._connect()
         row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
         return Document(**dict(row)) if row else None
+
+    def resolve_file_path(self, file: str) -> str:
+        """Resolve an indexed document path to an absolute filesystem path."""
+        path = Path(file).expanduser()
+        if path.is_absolute():
+            return str(path.resolve(strict=False))
+        if self.content_root is not None:
+            return str((self.content_root / path).resolve(strict=False))
+        return str(path.resolve(strict=False))
 
     def keyword_search(self, query: str, collection: str | None = None, limit: int = 50) -> list[tuple[int, float]]:
         """Run FTS5 keyword search. Returns list of (doc_id, bm25_score)."""

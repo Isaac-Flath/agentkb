@@ -22,7 +22,7 @@ def ensure_search_store(*, json_output: bool = False) -> IndexStore | None:
         echo_status("[agentkb] Updating Wiki index...", json_output=json_output)
         build_wiki_index(wiki_path, index_dir, json_output=json_output)
 
-    return IndexStore(index_dir)
+    return IndexStore(index_dir, content_root=wiki_path)
 
 
 def reindex(*, model: str | None = None, rebuild: bool = False) -> dict:

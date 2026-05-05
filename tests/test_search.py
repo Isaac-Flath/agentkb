@@ -22,7 +22,9 @@ from agentkb.search import (
     _matches_globs,
     SearchResult,
     merge_multi_collection,
+    search,
 )
+from agentkb.store import Document
 
 
 # --- rrf_fuse ---
@@ -198,20 +200,87 @@ def test_search_result_format_terminal():
 
 
 def test_search_result_to_json():
-    """to_json produces a serializable dict with key fields."""
+    """to_json produces compact metadata by default."""
     r = SearchResult(
         collection="chats",
-        file="2024-01/session.md",
+        file="/tmp/agentkb/chats/readable/2024-01/session.md",
         line=1,
         score=0.7123456,
+        relative_path="2024-01/session.md",
         name="my session",
         raw_content="the content",
     )
     j = r.to_json()
     assert j["collection"] == "chats"
+    assert j["file"] == "/tmp/agentkb/chats/readable/2024-01/session.md"
+    assert j["path"] == "/tmp/agentkb/chats/readable/2024-01/session.md"
+    assert j["filename"] == "session.md"
+    assert j["relative_path"] == "2024-01/session.md"
     assert j["score"] == 0.7123  # rounded to 4 decimals
-    assert j["content"] == "the content"
+    assert "content" not in j
     assert j["name"] == "my session"
+
+
+def test_search_result_to_json_can_include_content():
+    """Full content remains available when explicitly requested."""
+    r = SearchResult(
+        collection="wiki",
+        file="/tmp/agentkb/wiki/wiki/tools/git.md",
+        line=5,
+        score=0.9,
+        raw_content="the content",
+    )
+    assert r.to_json(include_content=True)["content"] == "the content"
+
+
+class _FakeSearchStore:
+    def __init__(self, root):
+        self.root = root
+
+    def get_document_ids(self, collection=None):
+        return [1] if collection == "wiki" else []
+
+    def semantic_search(self, query_embedding, top_k=50, subset_ids=None):
+        return [(1, 0.9)]
+
+    def keyword_search(self, query, collection=None, limit=50):
+        return []
+
+    def get_document_by_id(self, doc_id):
+        if doc_id != 1:
+            return None
+        return Document(
+            id=1,
+            collection="wiki",
+            file="wiki/tools/git.md",
+            line=5,
+            name="Git",
+            unit_type="chunk",
+            content="structured",
+            raw_content="raw",
+            title="Git",
+            section="Rebasing",
+            tags='["tools"]',
+        )
+
+    def resolve_file_path(self, file):
+        return str((self.root / file).resolve())
+
+
+def test_search_resolves_results_to_absolute_paths(tmp_path):
+    """Hydrated search results expose absolute paths and keep the relative path."""
+    results = search(
+        store=_FakeSearchStore(tmp_path),
+        query_embedding="fake-embedding",
+        query_text="git rebase",
+        scope="wiki:notes",
+        top_k=1,
+        semantic_only=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].file == str((tmp_path / "wiki/tools/git.md").resolve())
+    assert results[0].relative_path == "wiki/tools/git.md"
 
 
 # --- merge_multi_collection ---
@@ -308,8 +377,51 @@ def test_cli_search_json_sends_status_to_stderr_not_stdout(monkeypatch):
         )
 
     assert '"results": [' in stdout.getvalue()
+    assert '"filename": "test.md"' in stdout.getvalue()
+    assert '"content"' not in stdout.getvalue()
     assert "[agentkb] Updating Wiki index..." not in stdout.getvalue()
     assert "[agentkb] Updating Wiki index..." in stderr.getvalue()
+
+
+def test_cli_search_json_full_content_is_opt_in(monkeypatch):
+    """--json omits section content unless -c is supplied."""
+    monkeypatch.setattr("agentkb.wiki.ensure_search_store", lambda *, json_output=False: object())
+    monkeypatch.setattr("agentkb.chats.ensure_search_store", lambda *, json_output=False: None)
+    monkeypatch.setattr("agentkb.cli.get_encoder", lambda: _FakeEncoder())
+    monkeypatch.setattr("agentkb.cli.DEFAULT_MODEL", "fake-model")
+    monkeypatch.setattr("agentkb.cli.merge_query_with_pattern", lambda query, pattern: query)
+    monkeypatch.setattr("agentkb.cli.run_search", lambda **kwargs: [
+        SearchResult(
+            collection="wiki",
+            file="/tmp/agentkb/wiki/wiki/tools/test.md",
+            line=1,
+            score=0.9,
+            content="structured",
+            raw_content="raw section",
+        )
+    ])
+    monkeypatch.setattr("agentkb.cli.SearchTrace", _FakeTrace)
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        cli.search.callback(
+            query="query",
+            scope="wiki",
+            pattern=None,
+            fixed=False,
+            word=False,
+            files_only=False,
+            full_content=True,
+            top_k=15,
+            context_lines=6,
+            json_output=True,
+            include=(),
+            exclude=(),
+            exclude_dir=(),
+            semantic_only=False,
+        )
+
+    assert '"content": "raw section"' in stdout.getvalue()
 
 
 def test_cli_search_json_chat_reindex_stays_valid_json(monkeypatch, tmp_path):

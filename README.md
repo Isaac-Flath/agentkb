@@ -151,13 +151,15 @@ agentkb search --include="*.md" "writing style"
 agentkb search --exclude-dir=archive "config"
 
 agentkb search -k 10 "retry"                                 # top-k (default: 3)
-agentkb search -c "main entry point"                         # full content
+agentkb search -c "main entry point"                         # full content (including JSON)
 agentkb search -l "authentication"                           # files only
-agentkb search --json "error handling"                       # for scripts/agents
+agentkb search --json "error handling"                       # compact metadata for scripts/agents
 agentkb search --semantic-only "retry"                       # skip keyword search
 ```
 
 Results are tagged with their source: `[wiki]`, `[wiki:source]`, `[chats]`, `[communications]`.
+JSON search results use absolute `file`/`path` values, include `filename`, title,
+section, tags, and score metadata, and omit chunk content unless `-c` is passed.
 
 Every search is recorded in `~/.agentkb/traceability.db` — the original query, semantic-expanded query, pattern, per-stage rankings (semantic / keyword / RRF), and final results. Useful for evals and for debugging why a result did or didn't surface.
 
