@@ -80,7 +80,7 @@ Plain markdown files you and your agents write. General-purpose: gotchas, taste,
 
 ### Chats
 
-Coding-agent conversations, exported to readable markdown and indexed. Built-in sources: **Claude Code** (`~/.claude/projects/`) and **Pi** (`~/.pi/agent/sessions/`).
+Coding-agent conversations, exported to readable markdown and indexed. Built-in sources: **Claude Code** (`~/.claude/projects/`), **Codex** (`~/.codex/sessions/`), and **Pi** (`~/.pi/agent/sessions/`).
 
 Three-stage pipeline:
 

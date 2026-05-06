@@ -13,12 +13,18 @@ def test_pi_registered():
     assert "pi" in SOURCES
 
 
+def test_codex_registered():
+    """Codex source is registered."""
+    assert "codex" in SOURCES
+
+
 def test_get_all_sources():
-    """get_all_sources returns both registered sources."""
+    """get_all_sources returns all built-in sources."""
     sources = get_all_sources()
     names = {s.name for s in sources}
     assert "claude" in names
     assert "pi" in names
+    assert "codex" in names
 
 
 def test_get_source():
@@ -27,6 +33,8 @@ def test_get_source():
     assert claude.name == "claude"
     pi = get_source("pi")
     assert pi.name == "pi"
+    codex = get_source("codex")
+    assert codex.name == "codex"
 
 
 def test_source_dirs_are_callable():

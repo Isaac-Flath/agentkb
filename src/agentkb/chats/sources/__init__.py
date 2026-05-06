@@ -14,6 +14,7 @@ class ChatSource:
     name: str
     source_dir: Callable[[], Path | None]
     parse_jsonl: Callable[[Path], list[dict]]
+    project_name: Callable[[Path, str], str] | None = None
 
 
 SOURCES: dict[str, ChatSource] = {}
@@ -32,3 +33,9 @@ def get_all_sources() -> list[ChatSource]:
 def get_source(name: str) -> ChatSource:
     """Get a source by name."""
     return SOURCES[name]
+
+
+# Load built-in sources for callers that import the registry directly.
+import agentkb.chats.sources.claude  # noqa: E402,F401
+import agentkb.chats.sources.codex  # noqa: E402,F401
+import agentkb.chats.sources.pi  # noqa: E402,F401

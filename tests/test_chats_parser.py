@@ -28,6 +28,7 @@ from agentkb.chats.renderer import (
     export_sessions,
     export_readable,
 )
+from agentkb.utils import file_hash
 
 
 # --- _summarize_tool_input ---
@@ -256,6 +257,16 @@ def test_list_all_jsonl(tmp_path):
     assert "my-project/session1.jsonl" in files
 
 
+def test_list_all_jsonl_nested(tmp_path):
+    """Discovers JSONL files in nested source layouts like Codex."""
+    nested = tmp_path / "2026" / "05" / "06"
+    nested.mkdir(parents=True)
+    (nested / "rollout.jsonl").write_text("{}")
+
+    files = list_all_jsonl(tmp_path)
+    assert files == {"2026/05/06/rollout.jsonl": nested / "rollout.jsonl"}
+
+
 # --- export_sessions ---
 # export_sessions copies JSONL files from Claude Code's directory to agentkb's
 # own sessions/ directory. This is incremental — it uses file_hash to skip files
@@ -279,6 +290,29 @@ def test_export_sessions(tmp_path):
     stats2 = export_sessions(src, dst)
     assert stats2["copied"] == 0
     assert stats2["skipped"] == 1
+
+
+def test_export_readable_renders_when_state_exists_but_markdown_missing(tmp_path):
+    """State alone is not enough; missing readable markdown must be regenerated."""
+    sessions = tmp_path / "sessions"
+    readable = tmp_path / "readable"
+    jsonl = sessions / "claude" / "proj" / "s1.jsonl"
+    jsonl.parent.mkdir(parents=True)
+    jsonl.write_text("\n".join([
+        json.dumps({"type": "user", "timestamp": "2026-05-06T12:00:00Z",
+                    "message": {"content": "hello"}}),
+        json.dumps({"type": "assistant", "timestamp": "2026-05-06T12:00:01Z",
+                    "message": {"content": "hi"}}),
+    ]))
+    readable.mkdir()
+    (readable / "_state.json").write_text(json.dumps({
+        "claude/proj/s1.jsonl": file_hash(jsonl),
+    }))
+
+    stats = export_readable(sessions, readable)
+
+    assert stats["generated"] == 1
+    assert list(readable.rglob("*--claude--*.md"))
 
 
 class _FakeEncoder:

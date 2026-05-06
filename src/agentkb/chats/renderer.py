@@ -42,16 +42,13 @@ def _summarize_tool_input(tool_name: str, tool_input: dict) -> str:
 
 
 def list_all_jsonl(projects_dir: Path) -> dict[str, Path]:
-    """List all JSONL files under a source dir, keyed by "project/session.jsonl"."""
+    """List all JSONL files under a source dir, keyed by relative path."""
     files = {}
     if not projects_dir.exists():
         return files
 
-    for proj_entry in sorted(projects_dir.iterdir()):
-        if not proj_entry.is_dir():
-            continue
-        for jsonl_file in sorted(proj_entry.glob("*.jsonl")):
-            files[f"{proj_entry.name}/{jsonl_file.name}"] = jsonl_file
+    for jsonl_file in sorted(projects_dir.rglob("*.jsonl")):
+        files[jsonl_file.relative_to(projects_dir).as_posix()] = jsonl_file
 
     return files
 
@@ -66,6 +63,65 @@ def _slugify(text: str, max_len: int = 60) -> str:
     slug = re.sub(r'[\s_]+', '-', slug)
     slug = re.sub(r'-+', '-', slug).strip('-')
     return slug[:max_len].rstrip('-')
+
+
+def _session_fragment(session_id: str) -> str:
+    """Short stable fragment for unique readable filenames."""
+    session_slug = _slugify(session_id, max_len=80)
+    if not session_slug:
+        return "session"
+    return session_slug[-12:] if len(session_slug) > 12 else session_slug
+
+
+def _default_project_name(rel_path: str) -> str:
+    parts = Path(rel_path).parts
+    if len(parts) >= 2:
+        return parts[0]
+    if parts:
+        return Path(parts[0]).stem
+    return "unknown"
+
+
+def _load_existing_readable_metadata(readable_dir: Path) -> tuple[dict[str, dict], dict[tuple[str, str], dict]]:
+    from agentkb.utils import parse_frontmatter
+
+    by_source_jsonl: dict[str, dict] = {}
+    by_session: dict[tuple[str, str], dict] = {}
+
+    for md_file in readable_dir.rglob("*.md") if readable_dir.exists() else []:
+        if md_file.name == "_index.md":
+            continue
+        try:
+            text = md_file.read_text()
+            fm = parse_frontmatter(text)
+        except Exception:
+            continue
+
+        session_id = str(fm.get("session_id", ""))
+        source = str(fm.get("source", ""))
+        title = fm.get("title") or next(
+            (line[2:].strip() for line in text.splitlines() if line.startswith("# ")),
+            session_id,
+        )
+        meta = {
+            "session_id": session_id,
+            "project": fm.get("project", ""),
+            "source": source,
+            "source_jsonl": str(fm.get("source_jsonl", "")),
+            "date": str(fm.get("date", "")),
+            "messages": fm.get("messages", 0),
+            "first_prompt": "",
+            "title": title,
+            "filename": str(md_file.relative_to(readable_dir)),
+        }
+
+        source_jsonl = str(fm.get("source_jsonl", ""))
+        if source_jsonl:
+            by_source_jsonl[source_jsonl] = meta
+        if source and session_id:
+            by_session[(source, session_id)] = meta
+
+    return by_source_jsonl, by_session
 
 
 def _cap_lines(text: str, max_lines: int) -> str:
@@ -118,7 +174,10 @@ def _format_tool_use(block: dict) -> str:
     name = block.get("name", "unknown")
     inp = block.get("input", {})
     if not isinstance(inp, dict):
-        return f"**[{name}]**"
+        text = str(inp)
+        if not text.strip():
+            return f"**[{name}]**"
+        return f"**[{name}]**\n```\n{_cap_lines(text, 50)}\n```"
 
     canonical = name.capitalize()
     formatters = {
@@ -317,12 +376,11 @@ def export_readable(sessions_dir: Path, readable_dir: Path) -> dict:
     Incremental: skips sessions whose JSONL hasn't changed.
     """
     from agentkb.chats.sources import SOURCES
-    from agentkb.utils import parse_frontmatter
 
     readable_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect source files keyed as "{source}/{project}/{session}.jsonl"
-    source_files: dict[str, tuple[Path, str]] = {}
+    # Collect source files keyed as "{source}/{relative/session}.jsonl"
+    source_files: dict[str, tuple[Path, str, str]] = {}
     for source_subdir in sorted(sessions_dir.iterdir()) if sessions_dir.exists() else []:
         if not source_subdir.is_dir():
             continue
@@ -330,7 +388,7 @@ def export_readable(sessions_dir: Path, readable_dir: Path) -> dict:
         if src_name not in SOURCES:
             continue
         for rel_path, abs_path in list_all_jsonl(source_subdir).items():
-            source_files[f"{src_name}/{rel_path}"] = (abs_path, src_name)
+            source_files[f"{src_name}/{rel_path}"] = (abs_path, src_name, rel_path)
 
     state_path = readable_dir / "_state.json"
     old_state = {}
@@ -342,42 +400,31 @@ def export_readable(sessions_dir: Path, readable_dir: Path) -> dict:
 
     new_state = {}
     all_metadata = []
+    existing_by_source_jsonl, existing_by_session = _load_existing_readable_metadata(readable_dir)
     generated = 0
     skipped = 0
 
-    for rel_key, (src_path, src_name) in source_files.items():
+    for rel_key, (src_path, src_name, inner_rel) in source_files.items():
         src_hash = file_hash(src_path)
         new_state[rel_key] = src_hash
 
-        parts = rel_key.split("/")
-        project_name = parts[1] if len(parts) >= 3 else parts[0]
+        source_obj = SOURCES[src_name]
+        if source_obj.project_name:
+            project_name = source_obj.project_name(src_path, inner_rel)
+        else:
+            project_name = _default_project_name(inner_rel)
         session_id = src_path.stem
+        orig_dir = source_obj.source_dir()
+        orig_jsonl = str(orig_dir / inner_rel) if orig_dir else ""
+        existing_meta = (
+            existing_by_source_jsonl.get(orig_jsonl)
+            if orig_jsonl else None
+        ) or existing_by_session.get((src_name, session_id))
 
-        if old_state.get(rel_key) == src_hash:
-            for md_file in readable_dir.rglob(f"*{session_id[:8]}*.md"):
-                if md_file.name != "_index.md":
-                    try:
-                        fm = parse_frontmatter(md_file.read_text())
-                        all_metadata.append({
-                            "session_id": fm.get("session_id", session_id),
-                            "project": fm.get("project", project_name),
-                            "source": fm.get("source", src_name),
-                            "date": str(fm.get("date", "")),
-                            "messages": fm.get("messages", 0),
-                            "first_prompt": "",
-                            "title": fm.get("session_id", session_id),
-                            "filename": str(md_file.relative_to(readable_dir)),
-                        })
-                    except Exception:
-                        pass
-                    break
+        if old_state.get(rel_key) == src_hash and existing_meta:
+            all_metadata.append(existing_meta)
             skipped += 1
             continue
-
-        source_obj = SOURCES[src_name]
-        orig_dir = source_obj.source_dir()
-        inner_rel = "/".join(rel_key.split("/")[1:])
-        orig_jsonl = str(orig_dir / inner_rel) if orig_dir else ""
 
         md_content, metadata = render_session_markdown(
             src_path, project_name,
@@ -390,16 +437,20 @@ def export_readable(sessions_dir: Path, readable_dir: Path) -> dict:
 
         date = metadata.get("date", "unknown")
         month = date[:7] if len(date) >= 7 else "unknown"
-        slug = _slugify(metadata.get("title", "untitled"))
+        slug = _slugify(metadata.get("title", "untitled")) or "untitled"
         proj_slug = project_name.strip("-").replace("/", "-")
         if len(proj_slug) > 40:
             proj_slug = proj_slug[-40:]
 
-        filename = f"{date}--{src_name}--{proj_slug}--{slug}.md"
+        filename = f"{date}--{src_name}--{proj_slug}--{_session_fragment(session_id)}--{slug}.md"
         month_dir = readable_dir / month
         month_dir.mkdir(parents=True, exist_ok=True)
 
         out_path = month_dir / filename
+        if existing_meta:
+            old_path = readable_dir / str(existing_meta.get("filename", ""))
+            if old_path.exists() and old_path != out_path:
+                old_path.unlink()
         out_path.write_text(md_content)
 
         metadata["filename"] = f"{month}/{filename}"
